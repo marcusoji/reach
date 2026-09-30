@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "validate": "node scripts/validate.mjs",
+    "validate:migrations": "node scripts/tests/migrations.mjs",
     "validate:hardening": "node scripts/tests/final-hardening.mjs"
   },
   "dependencies": {

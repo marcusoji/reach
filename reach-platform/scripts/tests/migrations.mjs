@@ -1,0 +1,114 @@
+#!/usr/bin/env node
+// Executes every Supabase migration against a throwaway Postgres+PostGIS database,
+// one transaction per file -- mirroring how Supabase applies migrations. Static text
+// checks in validate.mjs cannot catch SQL that fails to parse or run; this does.
+//
+// Requires a Postgres server reachable via REACH_TEST_DATABASE_URL or PGHOST/PGPORT/
+// PGUSER/PGPASSWORD, plus the `psql` client. If PostGIS is unavailable the script
+// skips (exit 0) with a notice, so environments without the extension are not blocked.
+
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync, spawnSync } from 'node:child_process';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const migrationsDir = join(here, '..', '..', 'supabase', 'migrations');
+const bootstrap = join(here, 'supabase-bootstrap.sql');
+const dbName = 'reach_migration_validation';
+
+const baseArgs = [];
+if (process.env.REACH_TEST_DATABASE_URL) {
+  baseArgs.push(process.env.REACH_TEST_DATABASE_URL);
+} else {
+  baseArgs.push('-h', process.env.PGHOST || '127.0.0.1');
+  baseArgs.push('-p', process.env.PGPORT || '5432');
+  baseArgs.push('-U', process.env.PGUSER || 'postgres');
+  if (process.env.PGPASSWORD) baseArgs.push('-w');
+}
+const env = { ...process.env };
+const psql = (args, opts = {}) =>
+  spawnSync('psql', [...baseArgs, ...args], { encoding: 'utf8', env, ...opts });
+
+if (!spawnSync('psql', ['--version'], { encoding: 'utf8' }).stdout) {
+  console.log('SKIP - migration execution: psql client not installed.');
+  process.exit(0);
+}
+
+const server = psql(['-d', 'postgres', '-tAc', 'select 1']);
+if (server.status !== 0) {
+  console.log('SKIP - migration execution: no Postgres server reachable.');
+  console.log(`       ${(server.stderr || server.error?.message || '').trim().split('\n')[0]}`);
+  process.exit(0);
+}
+
+const hasPostgis = psql(['-d', 'postgres', '-tAc', "select 1 from pg_available_extensions where name='postgis'"]).stdout.trim();
+if (hasPostgis !== '1') {
+  console.log('SKIP - migration execution: PostGIS extension is not available on the server.');
+  process.exit(0);
+}
+
+// Fresh database for a deterministic run.
+psql(['-d', 'postgres', '-c', `drop database if exists ${dbName}`]);
+const created = psql(['-d', 'postgres', '-c', `create database ${dbName}`]);
+if (created.status !== 0) {
+  console.error('FAIL - migration execution: could not create test database.');
+  console.error(created.stderr.trim());
+  process.exit(1);
+}
+
+const run = (file) =>
+  psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '--single-transaction', '-f', file]);
+
+const boot = run(bootstrap);
+if (boot.status !== 0) {
+  console.error('FAIL - migration execution: Supabase bootstrap fixture failed.');
+  console.error(boot.stderr.trim());
+  process.exit(1);
+}
+
+const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+const failures = [];
+for (const file of files) {
+  const res = run(join(migrationsDir, file));
+  if (res.status !== 0) {
+    const err = (res.stderr || '').split('\n').find((l) => /ERROR/i.test(l)) || res.stderr.trim();
+    failures.push(`${file}: ${err.trim()}`);
+  }
+}
+
+if (failures.length) {
+  console.error(`FAIL - migration execution: ${failures.length} of ${files.length} migration(s) did not apply.`);
+  for (const f of failures) console.error(`  - ${f}`);
+  process.exit(1);
+}
+
+// The hardening migrations must leave privileged SECURITY DEFINER RPCs unreachable by
+// unauthenticated clients. Granting execute to `authenticated` is intended (the app calls
+// these as a signed-in user); what must never remain is PUBLIC (`=`) or `anon` access.
+const privileged = ['create_staff_invite', 'redeem_staff_invite', 'create_incident_for_current_user',
+  'transition_incident', 'assign_incident', 'ingest_relay_packet', 'promote_current_user_to_operator'];
+const privCheck = psql(['-d', dbName, '-tAc',
+  `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public' and p.prosecdef and p.proname = any(array[${privileged.map((p) => `'${p}'`).join(',')}])
+   and (p.proacl is null or exists (select 1 from unnest(p.proacl) a where a::text ~ '^(anon|public)?='))`]);
+const exposed = privCheck.stdout.trim().split('\n').filter(Boolean);
+if (exposed.length) {
+  console.error(`FAIL - privileged RPCs remain callable by anon/PUBLIC: ${exposed.join(', ')}`);
+  process.exit(1);
+}
+
+const tableCount = psql(['-d', dbName, '-tAc',
+  `select count(*) from pg_tables where schemaname='public'`]).stdout.trim();
+// Extension-owned tables (e.g. PostGIS spatial_ref_sys) are not part of the REACH schema.
+const rlsOff = psql(['-d', dbName, '-tAc',
+  `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+   where n.nspname='public' and c.relkind='r' and not c.relrowsecurity
+   and not exists (select 1 from pg_depend d where d.objid=c.oid and d.deptype='e')`]).stdout.trim();
+
+console.log(`PASS - migration execution: ${files.length} migrations applied transactionally (${tableCount} tables).`);
+if (rlsOff) {
+  console.error(`FAIL - row level security disabled on: ${rlsOff.split('\n').join(', ')}`);
+  process.exit(1);
+}
+console.log('PASS - row level security enabled on every public table; privileged RPCs are not anon-callable.');

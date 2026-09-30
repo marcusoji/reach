@@ -127,6 +127,6 @@ create policy ai_eval_insert_ops on public.ai_evaluations for insert with check 
 
 insert into public.ai_model_registry(model_name,provider,modality,version,status,calibration_version,latency_target_ms,metadata)
 values
-('REACH-Safety-Fusion','reach','text,image,audio,sensor,location,corroboration','2.0','active','baseline-v1',1200,'{"role":"deterministic_safety_fusion","human_review_required":true}'),
-('REACH-Multimodal-Assist','external','text,image,audio','1.0','shadow','pending-field-calibration',5000,'{"role":"model_assist","human_review_required":true}')
+('REACH-Safety-Fusion','reach','{text,image,audio,sensor,location,corroboration}','2.0','active','baseline-v1',1200,'{"role":"deterministic_safety_fusion","human_review_required":true}'),
+('REACH-Multimodal-Assist','external','{text,image,audio}','1.0','shadow','pending-field-calibration',5000,'{"role":"model_assist","human_review_required":true}')
 on conflict(model_name) do nothing;

@@ -324,6 +324,10 @@ drop policy if exists relay_insert on public.relay_packets;
 drop policy if exists relay_select on public.relay_packets;
 drop policy if exists notifications_insert on public.notifications;
 drop policy if exists devices_self on public.device_registrations;
+drop policy if exists devices_select_self on public.device_registrations;
+drop policy if exists devices_insert_self on public.device_registrations;
+drop policy if exists devices_update_self on public.device_registrations;
+drop policy if exists devices_delete_self on public.device_registrations;
 
 
 create policy relay_select_scoped on public.relay_packets for select using (
@@ -338,14 +342,14 @@ create policy devices_delete_self on public.device_registrations for delete usin
 -- Notifications are system-created; users only read their own/institution notifications.
 -- Broadcasts, subscriptions and payments remain read-only from client RLS.
 
-revoke all on public.create_staff_invite(text,public.reach_role,integer) from public;
-revoke all on public.redeem_staff_invite(text) from public;
-revoke all on public.create_institution_for_current_user(text,text,text,text) from public;
-revoke all on public.create_incident_for_current_user(jsonb,text) from public;
-revoke all on public.transition_incident(uuid,public.incident_status,text) from public;
-revoke all on public.assign_incident(uuid,uuid) from public;
-revoke all on public.ingest_relay_packet(jsonb) from public;
-revoke all on public.append_audit_log(text,text,uuid,jsonb) from public;
+revoke all on function public.create_staff_invite(text,public.reach_role,integer) from public;
+revoke all on function public.redeem_staff_invite(text) from public;
+revoke all on function public.create_institution_for_current_user(text,text,text,text) from public;
+revoke all on function public.create_incident_for_current_user(jsonb,text) from public;
+revoke all on function public.transition_incident(uuid,public.incident_status,text) from public;
+revoke all on function public.assign_incident(uuid,uuid) from public;
+revoke all on function public.ingest_relay_packet(jsonb) from public;
+revoke all on function public.append_audit_log(text,text,uuid,jsonb) from public;
 grant execute on function public.create_staff_invite(text,public.reach_role,integer) to authenticated;
 grant execute on function public.redeem_staff_invite(text) to authenticated;
 grant execute on function public.create_institution_for_current_user(text,text,text,text) to authenticated;

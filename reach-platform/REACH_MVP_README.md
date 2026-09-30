@@ -69,16 +69,31 @@ Billing is institution-level. The UI no longer pretends a payment was completed.
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/0001_reach_mvp.sql`.
-3. Run `supabase/migrations/0002_security_and_workflows.sql`.
-4. Deploy `supabase/functions/api/index.ts` as the `api` Edge Function.
-5. Configure server-side secrets:
+2. Apply `supabase/migrations/0001` through `0008` in order (`supabase db push`, or run each file in the Supabase SQL editor).
+3. Deploy `supabase/functions/api/index.ts` as the `api` Edge Function.
+4. Configure server-side secrets:
    - `REACH_ALLOWED_ORIGINS`
    - `REACH_OPERATOR_PROVISION_KEY`
-6. Configure the React `.env.local` with the Supabase URL, anon key and API URL.
-7. Configure the Citizen PWA `js/config.js` with the same public URL/anon key/API URL.
-8. Enable email verification/password recovery in Supabase Auth before production.
-9. Test RLS and the complete incident lifecycle with separate test users for each role.
+5. Configure the React `.env.local` with the Supabase URL, anon key and API URL.
+6. Configure the Citizen PWA `js/config.js` with the same public URL/anon key/API URL.
+7. Enable email verification/password recovery in Supabase Auth before production.
+8. Test RLS and the complete incident lifecycle with separate test users for each role.
+
+## Validation
+
+Run `npm run validate` in `reach-platform/`. It syntax-checks the PWA JavaScript, asserts the
+production hardening controls, and — when a Postgres+PostGIS server is reachable — executes every
+migration transactionally against a throwaway database and verifies RLS plus privileged-RPC grants.
+
+The migration step is skipped (with a notice) when no database is available. To run it explicitly:
+
+```
+npm run validate:migrations
+```
+
+It uses `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`, and requires the
+`psql` client and a server with the PostGIS extension. Static text checks alone cannot catch SQL
+that fails to parse or run, which is why the migrations are executed rather than only grepped.
 
 ## Important deployment rules
 

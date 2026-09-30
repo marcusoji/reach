@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const root = new URL('..', import.meta.url).pathname;
 const pwa = join(root, '..', 'reach-citizen-pwa');
@@ -47,4 +48,11 @@ if (!api.includes('x-idempotency-key is required for payment operations')) throw
 if (!env.includes('VITE_REACH_DEMO_MODE=false')) throw new Error('Explicit demo-mode gate missing');
 if (!bmoniApi.includes('AbortController')) throw new Error('BMONI timeout protection missing');
 if (!api.includes('const txMatch = path.match')) throw new Error('BMONI payment status route missing');
+
+// Static checks above cannot catch SQL that fails to parse or run. Execute the migrations
+// against a throwaway Postgres+PostGIS when one is reachable (see scripts/tests/migrations.mjs).
+const migrations = join(dirname(fileURLToPath(import.meta.url)), 'tests', 'migrations.mjs');
+const migrationRun = execFileSync(process.execPath, [migrations], { stdio: 'pipe', encoding: 'utf8' });
+process.stdout.write(migrationRun);
+
 console.log(`REACH validation passed: ${jsFiles.length} PWA JavaScript files syntax-checked and production hardening controls found.`);
