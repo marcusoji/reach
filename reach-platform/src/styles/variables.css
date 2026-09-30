@@ -1,0 +1,59 @@
+:root {
+  /* Brand & Accents */
+  --reach-brand: #c81e1e;
+  --reach-brand-dark: #a51818;
+  --reach-brand-light: #ffeded;
+
+  /* Neutrals & Surfaces */
+  --reach-bg-page: #efe6e6;
+  --reach-bg-surface: #ffffff;
+  --reach-bg-card: #fff3f3;
+  --reach-bg-card-hover: #fae8e8;
+  
+  /* Text */
+  --reach-text-primary: #111111;
+  --reach-text-secondary: #555555;
+  --reach-text-muted: #777777;
+  --reach-text-inverse: #ffffff;
+
+  /* Borders & Dividers */
+  --reach-border-solid: #000000;
+  --reach-border-subtle: rgba(0, 0, 0, 0.12);
+  --reach-border-card: #f5e4e4;
+
+  /* Semantic Statuses */
+  --status-verifying-text: #848403;
+  --status-verifying-bg: rgba(255, 204, 0, 0.15);
+
+  --status-responding-text: #0088ff;
+  --status-responding-bg: rgba(0, 136, 255, 0.12);
+
+  --status-success-text: #1c7c3b;
+  --status-success-bg: #d2f7dc;
+
+  --status-grace-text: #b86200;
+  --status-grace-bg: #ffe7c7;
+
+  --status-danger-text: #c81e1e;
+  --status-danger-bg: #fde2e2;
+
+  --status-neutral-text: #333333;
+  --status-neutral-bg: #ececec;
+
+  /* Typography */
+  --reach-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Radii */
+  --reach-radius-sm: 0.25rem;
+  --reach-radius-md: 0.5rem;
+  --reach-radius-lg: 0.75rem;
+  --reach-radius-pill: 9999px;
+
+  /* Shadows */
+  --reach-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --reach-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  /* Layout Widths */
+  --reach-sidebar-width: 240px;
+  --reach-content-max-width: 1400px;
+}

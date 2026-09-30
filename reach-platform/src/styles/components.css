@@ -1,0 +1,579 @@
+/* ==========================================================================
+   REACH Component Styles
+   ========================================================================== */
+
+/* --- App Top Navigation Bar --- */
+.app-top-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1.25rem;
+  background-color: var(--reach-bg-surface);
+  border: 1px solid var(--reach-border-subtle);
+  border-radius: var(--reach-radius-md);
+  box-shadow: var(--reach-shadow-sm);
+}
+
+.portal-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.portal-breadcrumb__name {
+  font-weight: 800;
+  color: var(--reach-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.portal-breadcrumb__divider {
+  color: var(--reach-text-muted);
+  font-weight: 400;
+}
+
+.portal-breadcrumb__section {
+  color: var(--reach-text-secondary);
+  font-weight: 500;
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.mesh-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #166534;
+}
+
+.mesh-status-chip__dot {
+  width: 7px;
+  height: 7px;
+  background: #22c55e;
+  border-radius: 50%;
+  animation: pulse-mesh-dot 2s infinite;
+}
+
+@keyframes pulse-mesh-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.user-chip__info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.user-chip__name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--reach-text-primary);
+}
+
+.user-chip__role {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--reach-brand);
+  text-transform: capitalize;
+}
+
+.demo-persona-select {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--reach-text-secondary);
+  background: var(--reach-bg-page);
+  border: 1px solid var(--reach-border-subtle);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.demo-persona-select:focus {
+  outline: 2px solid rgba(200, 30, 30, 0.25);
+  border-color: var(--reach-brand);
+}
+
+.user-chip__logout-btn {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--reach-brand);
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: var(--reach-brand-light);
+  border: 1px solid #f0c4c4;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.user-chip__logout-btn:hover {
+  background: #f7d6d6;
+  border-color: var(--reach-brand);
+}
+
+/* --- Section & Page Headers --- */
+.page-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.page-intro__eyebrow {
+  color: var(--reach-brand);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.page-intro__tag {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--reach-text-secondary);
+  background: var(--reach-bg-surface);
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--reach-radius-sm);
+  border: 1px solid var(--reach-border-subtle);
+}
+
+.page-intro__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.page-intro__title {
+  font-size: 2.25rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  color: var(--reach-text-primary);
+  line-height: 1.15;
+}
+
+.page-intro__subtitle {
+  font-size: 1rem;
+  color: var(--reach-text-secondary);
+  max-width: 48rem;
+  line-height: 1.4;
+}
+
+/* --- Cards --- */
+.reach-card {
+  background: var(--reach-bg-card);
+  border-radius: var(--reach-radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+.reach-card:hover {
+  border-color: var(--reach-border-card);
+}
+
+/* --- Stat Cards --- */
+.stat-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  background: var(--reach-bg-card);
+  padding: 1.25rem;
+  border-radius: var(--reach-radius-md);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 6.5rem;
+}
+
+.stat-card__label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--reach-text-secondary);
+}
+
+.stat-card__value {
+  font-size: 2.25rem;
+  font-weight: 900;
+  color: var(--reach-text-primary);
+  line-height: 1;
+}
+
+.stat-card__value--compact {
+  font-size: 1.75rem;
+}
+
+/* --- Status Badges --- */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--reach-radius-md);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.status-badge--verifying {
+  background: var(--status-verifying-bg);
+  color: var(--status-verifying-text);
+}
+
+.status-badge--responding {
+  background: var(--status-responding-bg);
+  color: var(--status-responding-text);
+}
+
+.status-badge--success,
+.status-badge--on-duty,
+.status-badge--active,
+.status-badge--healthy {
+  background: var(--status-success-bg);
+  color: var(--status-success-text);
+}
+
+.status-badge--grace {
+  background: var(--status-grace-bg);
+  color: var(--status-grace-text);
+}
+
+.status-badge--danger,
+.status-badge--inactive,
+.status-badge--unhealthy {
+  background: var(--status-danger-bg);
+  color: var(--status-danger-text);
+}
+
+.status-badge--resolved,
+.status-badge--pushed {
+  background: var(--status-neutral-bg);
+  color: var(--status-neutral-text);
+}
+
+/* --- Filter Pills / Button Groups --- */
+.filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.filter-pills__item {
+  border: 1px solid transparent;
+  background: var(--reach-bg-card);
+  color: var(--reach-text-primary);
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--reach-radius-md);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.filter-pills__item:hover {
+  background: var(--reach-bg-card-hover);
+}
+
+.filter-pills__item--active {
+  background: var(--reach-text-primary);
+  color: var(--reach-text-inverse);
+  box-shadow: var(--reach-shadow-sm);
+}
+
+/* --- Buttons --- */
+.reach-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.5rem;
+  border-radius: var(--reach-radius-md);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  line-height: 1.2;
+}
+
+.reach-button:focus-visible {
+  outline: 2px solid var(--reach-brand);
+  outline-offset: 2px;
+}
+
+.reach-button--primary {
+  background: var(--reach-brand);
+  color: var(--reach-text-inverse);
+}
+
+.reach-button--primary:hover {
+  background: var(--reach-brand-dark);
+}
+
+.reach-button--dark {
+  background: var(--reach-text-primary);
+  color: var(--reach-text-inverse);
+}
+
+.reach-button--dark:hover {
+  background: #333333;
+}
+
+.reach-button--outline {
+  background: transparent;
+  border: 2px solid var(--reach-text-primary);
+  color: var(--reach-text-primary);
+}
+
+.reach-button--outline:hover {
+  background: var(--reach-text-primary);
+  color: var(--reach-text-inverse);
+}
+
+.reach-button--ghost {
+  background: var(--reach-bg-surface);
+  color: var(--reach-text-primary);
+  box-shadow: var(--reach-shadow-sm);
+}
+
+.reach-button--ghost:hover {
+  background: var(--reach-bg-card-hover);
+}
+
+/* --- Incident Cards --- */
+.incident-card {
+  background: var(--reach-bg-card);
+  padding: 1.25rem;
+  border-radius: var(--reach-radius-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  transition: background 0.15s ease;
+}
+
+.incident-card:hover {
+  background: var(--reach-bg-card-hover);
+}
+
+.incident-card__details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.incident-card__code {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--reach-text-secondary);
+}
+
+.incident-card__title {
+  font-size: 1.75rem;
+  font-weight: 900;
+  color: var(--reach-text-primary);
+  line-height: 1.2;
+}
+
+.incident-card__meta {
+  font-size: 0.9rem;
+  color: var(--reach-text-secondary);
+  font-family: monospace;
+}
+
+/* --- Media Chips --- */
+.media-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.media-chip {
+  padding: 0.75rem 1.5rem;
+  border: 2px solid var(--reach-border-solid);
+  border-radius: var(--reach-radius-md);
+  font-size: 0.9rem;
+  font-weight: 700;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.media-chip:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.media-chip--active {
+  background: var(--reach-border-solid);
+  color: var(--reach-text-inverse);
+}
+
+/* --- Key-Value Row & Lists --- */
+.key-value-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: var(--reach-bg-card);
+  padding: 1.25rem;
+  border-radius: var(--reach-radius-md);
+}
+
+.key-value-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--reach-border-solid);
+  padding-bottom: 0.75rem;
+  gap: 1.5rem;
+}
+
+.key-value-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.key-value-row__key {
+  font-size: 0.95rem;
+  color: var(--reach-text-primary);
+}
+
+.key-value-row__value {
+  font-weight: 700;
+  color: var(--reach-text-primary);
+  text-align: right;
+}
+
+/* --- Task Checkboxes --- */
+.task-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.task-checklist__item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.task-checklist__input {
+  width: 1.2rem;
+  height: 1.2rem;
+  accent-color: var(--reach-brand);
+  cursor: pointer;
+}
+
+.task-checklist__label {
+  font-size: 0.95rem;
+  color: var(--reach-text-primary);
+  cursor: pointer;
+}
+
+/* --- Modal Dialog --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-dialog {
+  background: var(--reach-bg-surface);
+  border-radius: var(--reach-radius-lg);
+  padding: 1.75rem;
+  max-width: 32rem;
+  width: 100%;
+  box-shadow: var(--reach-shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.modal-dialog__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-dialog__title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--reach-text-primary);
+}
+
+.modal-dialog__close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--reach-text-secondary);
+}
+
+.modal-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.reach-input {
+  width: 100%;
+  border: 1px solid var(--reach-border);
+  background: var(--reach-bg-card);
+  color: var(--reach-text-primary);
+  border-radius: var(--reach-radius-md);
+  padding: .8rem .9rem;
+  outline: none;
+  font: inherit;
+}
+.reach-input:focus { border-color: var(--reach-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--reach-primary) 15%, transparent); }
+.reach-badge { display:inline-flex; align-items:center; gap:.35rem; padding:.35rem .6rem; border-radius:999px; background:var(--reach-bg-card); border:1px solid var(--reach-border); font-size:.78rem; font-weight:700; white-space:nowrap; }

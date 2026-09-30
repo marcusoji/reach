@@ -1,0 +1,6 @@
+import React,{useEffect,useState} from 'react';
+import { SectionHeader } from '../../components/common/SectionHeader';
+import { KeyValueRow } from '../../components/common/KeyValueRow';
+import { apiFetch,isBackendConfigured } from '../../lib/reachApi';
+import { useApp } from '../../context/AppContext';
+export const NotificationsPage:React.FC=()=>{const {institutions}=useApp();const [items,setItems]=useState<any[]>([]);useEffect(()=>{if(isBackendConfigured)void apiFetch<{data:any[]}>('/notifications').then(r=>setItems(r.data||[])).catch(()=>undefined);},[]);const current=institutions[0];return <div style={{display:'flex',flexDirection:'column',gap:'2rem'}}><SectionHeader eyebrow={current?`Institution - ${current.name}`:'Institution'} tag={current?.code} title="Notifications" subtitle="System alerts and communications delivered through REACH core."/><div className="reach-card" style={{padding:'1.5rem'}}><div className="key-value-list" style={{padding:0}}>{items.length?items.map(item=><KeyValueRow key={item.id} label={<span style={{fontWeight:600,color:'var(--reach-text-secondary)'}}>{new Date(item.created_at).toLocaleString()}</span>} value={<span style={{fontWeight:700}}>{item.title}: {item.body}</span>}/>):<p style={{color:'var(--reach-text-secondary)',fontWeight:600}}>No notifications have been delivered yet.</p>}</div></div></div>};

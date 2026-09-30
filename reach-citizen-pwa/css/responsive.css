@@ -1,0 +1,58 @@
+/* ==========================================================================
+   REACH Mobile App - Responsive Layout & Media Queries
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Small Screen Adjustments (<= 480px / Native Mobile Displays)
+   ----------------------------------------------------------------------- */
+@media (max-width: 480px) {
+  .shell {
+    padding: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    align-items: stretch;
+  }
+
+  /* Fill viewport cleanly on real mobile devices */
+  .phone {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+  }
+
+  .phone-screen {
+    border-radius: 0;
+  }
+
+}
+
+/* --------------------------------------------------------------------------
+   2. Height-constrained Viewports
+   ----------------------------------------------------------------------- */
+@media (max-height: 680px) and (min-width: 481px) {
+  .shell {
+    padding: 10px;
+  }
+
+  .phone {
+    height: min(600px, 95vh);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   3. Reduced Motion Preferences
+   ----------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

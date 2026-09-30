@@ -1,0 +1,13 @@
+name: reach_bmoni_institution_mobile
+description: Device-side BMONI Embedded signing boundary for REACH institutions.
+publish_to: none
+environment:
+  sdk: '>=3.11.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  bmoni_embedded_sdk: ^0.0.2
+  bkey_uikit: ^0.0.1
+  bmoni_embedded_wallets_cards: ^0.0.1
+flutter:
+  uses-material-design: true

@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>REACH — Citizen Mobile App</title>
+
+  <!-- Google Web Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Modular Stylesheets -->
+  <link rel="stylesheet" href="./css/styles.css">
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#0f7b5a">
+  <link rel="stylesheet" href="./css/components.css">
+  <link rel="stylesheet" href="./css/responsive.css">
+
+  <!-- Favicon / App Icon -->
+  <link rel="icon" type="image/svg+xml" href="./assets/icons/reach-logo.svg">
+</head>
+<body>
+
+<div class="shell">
+  <!-- Mobile Phone Hardware Container -->
+  <main class="phone" role="application" aria-label="REACH Citizen Mobile App">
+        <div class="phone-screen" id="phoneScreen">
+          <!-- Dynamic Status Bar -->
+          <div class="status-bar hidden" id="statusBar">
+            <span id="statusBarClock">6:42</span>
+            <span class="signal-tag no" id="signalTag">NO SIGNAL</span>
+          </div>
+
+          <!-- =============================================================
+               SCREEN 1: Splash
+               ============================================================= -->
+          <section class="screen-view active" id="screen-splash" data-screen="splash">
+            <div class="splash" data-nav="onboarding" style="cursor: pointer;">
+              <div class="mark-lg">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2L3 7V12C3 16.5 6.8 20.7 12 22C17.2 20.7 21 16.5 21 12V7L12 2Z" fill="#C81E1E"/>
+                  <path d="M9 12.5L11 14.5L15.5 9.5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <h1>REACH</h1>
+              <p>Any person. Any phone. Any community. One emergency network.</p>
+              <div class="spinner"></div>
+              <div class="stack" style="width: calc(100% - 60px); margin-top: 24px;">
+                <button class="btn-ghost" data-nav="onboarding" style="color: white; border-color: rgba(255,255,255,0.4); font-size: 13.5px; padding: 10px;">Get Started →</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 2: Onboarding
+               ============================================================= -->
+          <section class="screen-view" id="screen-onboarding" data-screen="onboarding">
+            <div class="pad" style="padding-top:40px;">
+              <div class="onb-illustration">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                  <rect x="3" y="7" width="18" height="13" rx="2"/>
+                  <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+                </svg>
+              </div>
+              <h2 style="font-size:22px; font-family:'Inter', sans-serif; margin-bottom:8px;">Your alert doesn't need a straight line to help</h2>
+              <p style="font-size:13.5px; color:var(--ink-500); line-height:1.6;">If your phone has no signal, nearby REACH devices can carry your emergency packet until it reaches someone who can respond.</p>
+              <div class="onb-dots"><span class="on"></span><span></span><span></span></div>
+              <div class="stack">
+                <button class="btn-primary" data-nav="register">Continue</button>
+                <button class="btn-text" data-nav="register">Skip</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 3: Registration
+               ============================================================= -->
+          <section class="screen-view" id="screen-register" data-screen="register">
+            <div class="app-header">
+              <button class="back-btn" data-nav="onboarding" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>Create your account</h2>
+            </div>
+            <div class="pad">
+              <div class="field"><label>Full name</label><input id="registerName" type="text" value="" placeholder="Amaka Okafor"></div>
+              <div class="field"><label>Email address</label><input id="registerEmail" type="email" value="" placeholder="you@example.com" autocomplete="email"></div>
+              <div class="field"><label>Password</label><input id="registerPassword" type="password" value="" placeholder="At least 8 characters" autocomplete="new-password"></div>
+              <div class="field"><label>Phone number</label><input id="registerPhone" type="text" value="" placeholder="080X XXX XXXX" autocomplete="tel"></div>
+              <div class="field">
+                <label>Registered location</label>
+                <select id="registerLocation"><option>Zone B — Hostel Block 4</option></select>
+                <div class="field-hint">Used if your device has no GPS during an emergency.</div>
+              </div>
+              <div class="stack">
+                <button class="btn-primary" data-nav="relaypermission">Create account</button>
+                <button class="btn-text" data-nav="login">Already have an account? Log in</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 4: Login
+               ============================================================= -->
+          <section class="screen-view" id="screen-login" data-screen="login">
+            <div class="app-header">
+              <button class="back-btn" data-nav="register" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>Sign in</h2>
+            </div>
+            <div class="pad">
+              <div class="field"><label>Email address</label><input id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email"></div>
+              <div class="field"><label>Password</label><input id="loginPassword" type="password" placeholder="Your password" autocomplete="current-password"></div>
+              <div class="stack">
+                <button class="btn-primary" id="loginSubmit">Sign in</button>
+                <button class="btn-text" data-nav="register">Create a new account</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 4: Enable Relay Permission
+               ============================================================= -->
+          <section class="screen-view" id="screen-relaypermission" data-screen="relaypermission">
+            <div class="pad" style="padding-top:32px;">
+              <div class="relay-hero">
+                <span class="rp r1"></span><span class="rp r2"></span>
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                  <rect x="3" y="7" width="18" height="13" rx="2"/>
+                  <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+                </svg>
+              </div>
+              <h2 style="font-size:20px; font-family:'Inter', sans-serif; margin-bottom:6px;">Help carry alerts, even offline</h2>
+              <p style="font-size:13px; color:var(--ink-500); line-height:1.55; margin-bottom:18px;">When supported by the device and browser, your phone can help relay an emergency packet nearby. Background operation is subject to device, browser, and OS permissions.</p>
+
+              <div class="toggle-row on" id="relayToggleRow">
+                <div class="ti">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+                    <rect x="3" y="7" width="18" height="13" rx="2"/>
+                    <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+                  </svg>
+                </div>
+                <div class="tt">
+                  <b>Background relay</b>
+                  <span id="relayToggleSub">On — this device can carry emergency packets nearby</span>
+                </div>
+                <div class="switch on" id="relaySwitch"></div>
+              </div>
+
+              <div class="reassure-list">
+                <div class="reassure-row"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Uses a controlled relay mode when supported by the device and browser</div>
+                <div class="reassure-row"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Only the minimum relay packet is handled; sensitive incident details are not intentionally exposed</div>
+                <div class="reassure-row"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>You can turn this off anytime in Settings</div>
+              </div>
+
+              <div class="stack">
+                <button class="btn-primary" data-nav="home">Continue</button>
+                <button class="btn-text" data-nav="home">Not now</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 5: Home (SOS Button)
+               ============================================================= -->
+          <section class="screen-view" id="screen-home" data-screen="home">
+            <div class="home-top">
+              <span class="greeting">Hi, <b>Amaka</b></span>
+              <div class="avatar">AO</div>
+            </div>
+            <div style="padding:10px 20px 0;">
+              <div class="ai-chip"><span class="pd"></span>AI evidence review — only when enabled and supported</div>
+            </div>
+            <div class="relay-status-chip" id="homeRelayChip" style="margin-top:10px;">
+              <span class="rd"></span><span>Relay participation is on — availability depends on supported relay hardware</span>
+            </div>
+            <button class="demo-trigger-btn" id="demoRelayButton" data-nav="relaynotify">▸ Demo: simulate an incoming relay notification</button>
+            <div class="sos-zone" style="gap:14px;">
+              <button class="sos-btn" data-nav="category">HOLD FOR<br>EMERGENCY</button>
+              <div class="sos-caption">Press and hold, then confirm. REACH works even without signal.</div>
+            </div>
+            <button class="ai-nudge" data-nav="aidetect" style="text-align:left; width:calc(100% - 40px);">
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 2.8V15a3 3 0 0 0 3 3h.5M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 2.8V15a3 3 0 0 1-3 3h-.5M9 18v1a3 3 0 0 0 6 0v-1"/><circle cx="12" cy="9" r="1"/></svg>
+              </div>
+              <div class="txt"><b>AI noticed unusual motion</b><span>Review evidence — 2 signals detected</span></div>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+            <div class="quick-row">
+              <div class="quick-card" data-nav="resolved"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Incident history</span></div>
+              <div class="quick-card" data-nav="contacts"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Trusted contacts</span></div>
+              <div class="quick-card" data-nav="relaypermission"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l2.5 1.5"/></svg><span>Settings</span></div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 6: AI Detection & Evidence Review
+               ============================================================= -->
+          <section class="screen-view" id="screen-aidetect" data-screen="aidetect">
+            <div class="app-header">
+              <button class="back-btn" data-nav="home" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>AI evidence review</h2>
+            </div>
+            <div class="pad">
+              <div class="ai-tag" style="margin-bottom:4px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 2.8V15a3 3 0 0 0 3 3h.5M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 2.8V15a3 3 0 0 1-3 3h-.5M9 18v1a3 3 0 0 0 6 0v-1"/><circle cx="12" cy="9" r="1"/></svg>AI PERCEPTION
+              </div>
+              <div class="sense-row" id="senseRow">
+                <div class="sense-chip" id="senseMotion"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg><span>Motion</span></div>
+                <div class="sense-chip" id="senseVisual"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>Visual</span></div>
+                <div class="sense-chip" id="senseAudio"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3a4 4 0 0 0-4 4v5a4 4 0 0 0 8 0V7a4 4 0 0 0-4-4z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Audio</span></div>
+              </div>
+              <div class="fusion-list" id="fusionList"></div>
+              <div id="gaugeWrap" style="display:none;">
+                <div class="ai-gauge-top"><span class="l">Fused confidence</span><span class="p" id="gaugePct">0%</span></div>
+                <div class="ai-gauge-bar"><div class="ai-gauge-fill" id="gaugeFill"></div></div>
+              </div>
+              <div id="aiConfirmSlot"></div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 7: Emergency Category Selection
+               ============================================================= -->
+          <section class="screen-view" id="screen-category" data-screen="category">
+            <div class="app-header">
+              <button class="back-btn" data-nav="home" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>What's happening?</h2>
+            </div>
+            <div class="pad">
+              <div class="cat-list" id="catList">
+                <div class="cat-row selected" data-category="fire">
+                  <div class="cat-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2c1 3-2 4-2 7a4 4 0 0 0 8 0c0-1-.5-2-1-3 1 0 3 2 3 6a7 7 0 1 1-14 0c0-5 4-6 6-10z"/></svg>
+                  </div>
+                  <div class="cat-text"><b>Fire</b><span>Smoke, flames, burning smell</span></div>
+                  <div class="radio"></div>
+                </div>
+                <div class="cat-row" data-category="medical">
+                  <div class="cat-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M19 14c1.5-1.5 2-3 2-4.5A5.5 5.5 0 0 0 12 6a5.5 5.5 0 0 0-9 3.5c0 1.5.5 3 2 4.5l7 7 7-7z"/></svg>
+                  </div>
+                  <div class="cat-text"><b>Medical</b><span>Injury, collapse, health crisis</span></div>
+                  <div class="radio"></div>
+                </div>
+                <div class="cat-row" data-category="security">
+                  <div class="cat-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.8 8-9 10-5.2-2-9-5-9-10V6l9-4z"/></svg>
+                  </div>
+                  <div class="cat-text"><b>Security</b><span>Threat, intrusion, unsafe situation</span></div>
+                  <div class="radio"></div>
+                </div>
+                <div class="cat-row" data-category="accident">
+                  <div class="cat-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+                  </div>
+                  <div class="cat-text"><b>Accident</b><span>Vehicle, fall, physical incident</span></div>
+                  <div class="radio"></div>
+                </div>
+              </div>
+              <div class="stack" style="margin-top:16px;">
+                <button class="btn-primary" data-nav="location">Continue</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 8: Location Confirmation
+               ============================================================= -->
+          <section class="screen-view" id="screen-location" data-screen="location">
+            <div class="app-header">
+              <button class="back-btn" data-nav="category" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>Confirm your location</h2>
+            </div>
+            <div class="pad">
+              <div class="map-mini"><div class="grid"></div><div class="pin"></div></div>
+              <div class="loc-list" id="locList">
+                <div class="loc-option selected" data-loc-type="registered">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                  <div><b>Registered location</b><span>Zone B — Hostel Block 4</span></div>
+                </div>
+                <div class="loc-option" data-loc-type="gps">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+                  <div><b>GPS location</b><span>Unavailable — no signal</span></div>
+                </div>
+                <div class="loc-option" data-loc-type="manual">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                  <div><b>Choose a zone manually</b><span>Block A, Block B, Hostel, Main Gate…</span></div>
+                </div>
+              </div>
+              <div class="stack" style="margin-top:6px;">
+                <button class="btn-primary" data-nav="confirm">Use this location</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 9: Review & Send Confirmation
+               ============================================================= -->
+          <section class="screen-view" id="screen-confirm" data-screen="confirm">
+            <div class="app-header">
+              <button class="back-btn" data-nav="location" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>Review before sending</h2>
+            </div>
+            <div class="pad">
+              <div class="confirm-card">
+                <div class="confirm-row"><span>Type</span><span id="confirmCatType">Fire</span></div>
+                <div class="confirm-row"><span>Location</span><span id="confirmLocType">Zone B</span></div>
+                <div class="confirm-row"><span>Priority</span><span>High · human confirmed</span></div>
+                <div class="confirm-row"><span>Confidence</span><span>Assessment pending</span></div>
+                <div class="confirm-row"><span>Network</span><span id="confirmNetwork">Checking…</span></div>
+              </div>
+              <div class="evidence-mini" style="margin-top:16px;">
+                <div class="evidence-mini-row">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+                  <div><b>Motion spike</b><span>Detected on-device</span></div>
+                </div>
+                <div class="evidence-mini-row">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <div><b>Visual smoke match</b><span>smoke-vision-v1.2</span></div>
+                </div>
+                <div class="evidence-mini-row">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+                  <div><b>You confirmed it</b><span>Human sign-off recorded</span></div>
+                </div>
+              </div>
+              <div class="warn-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.5 17a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+                <span>If you are offline, REACH saves the alert locally and syncs when a connection or supported relay path becomes available.</span>
+              </div>
+              <div class="stack">
+                <button class="btn-primary" data-nav="tracking">Send emergency alert</button>
+                <button class="btn-ghost" data-nav="category">Go back</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 10: Live Relay Tracking
+               ============================================================= -->
+          <section class="screen-view" id="screen-tracking" data-screen="tracking">
+            <div class="status-hero">
+              <div class="status-ring">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
+                  <rect x="3" y="7" width="18" height="13" rx="2"/>
+                  <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+                </svg>
+              </div>
+              <h2>Relaying your alert</h2>
+              <p>REACH is tracking the delivery state of your alert</p>
+            </div>
+            <div class="journey">
+              <div class="j-step done"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></div><div class="j-text"><b>Emergency details confirmed</b><span>Human confirmation recorded</span></div></div>
+              <div class="j-step done"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></div><div class="j-text"><b>Alert packet created</b><span>Preparing delivery</span></div></div>
+              <div class="j-step done"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></div><div class="j-text"><b>Delivery path</b><span id="trackingDeliveryPath">Pending</span></div></div>
+              <div class="j-step current"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></div><div class="j-text"><b>Awaiting REACH network</b><span id="trackingNetworkState">Pending</span></div></div>
+              <div class="j-step"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 12h16M12 4v16"/></svg></div><div class="j-text"><b>Reaches REACH network</b><span id="trackingCoreState">Pending</span></div></div>
+              <div class="j-step"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div><div class="j-text"><b>Responder assigned</b><span id="trackingResponderState">Pending</span></div></div>
+            </div>
+            <div class="pad" style="padding-top:0;">
+              <button class="btn-ghost" id="demoResolveButton" data-nav="resolved">Demo: mark as resolved →</button>
+              <button class="btn-text" data-nav="home" style="margin-top: 6px;">Return to Home</button>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 11: Incident Resolved
+               ============================================================= -->
+          <section class="screen-view" id="screen-resolved" data-screen="resolved">
+            <div class="resolved-hero">
+              <div class="resolved-ring">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+              </div>
+              <h2 style="font-size:22px;">Help arrived</h2>
+              <p style="font-size:12.5px; color:var(--ink-500); margin-top:4px;">Your incident has been resolved</p>
+            </div>
+            <div class="summary-box">
+              <div class="summary-row"><span>Incident</span><span class="mono">REACH-8492</span></div>
+              <div class="summary-row"><span>Detected by</span><span>AI Guardian + you</span></div>
+              <div class="summary-row"><span>Responder</span><span>Femi A. — First Aid</span></div>
+              <div class="summary-row"><span>Response time</span><span>4 min 12 sec</span></div>
+              <div class="summary-row"><span>Delivered via</span><span>Offline relay</span></div>
+            </div>
+            <div class="pad">
+              <div class="stack">
+                <button class="btn-primary" data-nav="home">Back to home</button>
+                <button class="btn-ghost">View full report</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 12: Trusted Contacts
+               ============================================================= -->
+          <section class="screen-view" id="screen-contacts" data-screen="contacts">
+            <div class="app-header">
+              <button class="back-btn" data-nav="home" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>Trusted contacts</h2>
+            </div>
+            <div class="pad">
+              <p style="font-size:12px; color:var(--ink-500); margin-bottom:12px; line-height:1.5;">These people are notified when you raise an emergency, and can confirm your location if you can't.</p>
+              <div id="contactsList"></div>
+              <div class="add-contact" id="addContactButton" role="button" tabindex="0">
+                <div class="add-icon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                </div>
+                <span style="font-size:13px; font-weight:600; color:var(--ink-500);">Add trusted contact</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 13: Background Relay Lockscreen Notification (Phone B)
+               ============================================================= -->
+          <section class="screen-view" id="screen-relaynotify" data-screen="relaynotify">
+            <div class="notif-stage">
+              <div class="notif-lockclock"><div class="t">6:47</div><div class="d">Saturday, 12 September</div></div>
+              <div class="os-notif" data-nav="relaytransfer">
+                <div class="ni">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                    <rect x="3" y="7" width="18" height="13" rx="2"/>
+                    <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+                  </svg>
+                </div>
+                <div class="nb">
+                  <div class="nt"><b>REACH</b><span>now</span></div>
+                  <p>Relaying an emergency alert nearby. Tap to see what's being sent.</p>
+                </div>
+              </div>
+              <div class="notif-hint" data-nav="home" style="cursor: pointer;">Demo relay view — browser background relay availability varies by device and OS</div>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN 14: Packet Transfer Hop View (Phone B)
+               ============================================================= -->
+          <section class="screen-view" id="screen-relaytransfer" data-screen="relaytransfer">
+            <div class="relay-role-banner">
+              <div class="rb-ic">
+                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                  <rect x="3" y="7" width="18" height="13" rx="2"/>
+                  <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+                </svg>
+              </div>
+              <div><b>This device is relaying for someone else</b><span>You are Phone B in this transfer · native relay channel</span></div>
+            </div>
+            <div class="hop-trace">
+              <div class="hop-node active"><div class="hi"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/></svg></div><b>Phone A</b><span>Offline</span></div>
+              <div class="hop-line active"></div>
+              <div class="hop-node active"><div class="hi"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg></div><b>This phone</b><span>Relaying</span></div>
+              <div class="hop-line"></div>
+              <div class="hop-node"><div class="hi"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 12h16M12 4v16"/></svg></div><b>REACH HQ</b><span>Pending</span></div>
+            </div>
+            <div class="pad" style="padding-top:6px;">
+              <div class="packet-box">
+                <div class="pk-title">EMERGENCY PACKET · REACH-8492</div>
+                <div class="pk-row"><span>TYPE</span><span>Fire</span></div>
+                <div class="pk-row"><span>ZONE</span><span>B</span></div>
+                <div class="pk-row"><span>PRIORITY</span><span>Critical</span></div>
+                <div class="pk-row"><span>RECEIVED VIA</span><span>Local hop · supported relay channel</span></div>
+                <div class="pk-row"><span>SIZE</span><span>0.6 KB</span></div>
+                <div class="path-trace">
+                  <div class="path-hop"><div class="hd"></div>Received from Phone A — 6:47:02 PM</div>
+                  <div class="path-hop pending"><div class="hd"></div>Forwarding once uplink is stable…</div>
+                </div>
+              </div>
+            </div>
+            <div class="not-you-note">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.5 17a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+              This isn't your emergency. You're just helping the packet along — no details beyond this summary are stored on your device.
+            </div>
+            <div class="pad" style="padding-top:0;">
+              <button class="btn-ghost" data-nav="home">Done</button>
+            </div>
+          </section>
+        </div>
+  </main>
+</div>
+
+<!-- Application Entrypoint -->
+<script src="./js/config.js"></script>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

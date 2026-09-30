@@ -1,0 +1,229 @@
+/* ==========================================================================
+   REACH Layout & Responsiveness
+   ========================================================================== */
+
+/* Main Application Shell */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--reach-bg-page);
+}
+
+/* Sidebar Navigation (Desktop) */
+.app-sidebar {
+  width: var(--reach-sidebar-width);
+  background-color: var(--reach-bg-surface);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--reach-border-subtle);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: var(--reach-shadow-sm);
+}
+
+.app-sidebar__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+  padding: 3rem 1.75rem;
+}
+
+.app-sidebar__logo {
+  color: var(--reach-brand);
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.app-sidebar__nav-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--reach-text-muted);
+  font-weight: 800;
+  margin-bottom: 0.5rem;
+  padding-left: 0.5rem;
+}
+
+.app-sidebar__nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  list-style: none;
+}
+
+.app-sidebar__nav-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  color: var(--reach-text-primary);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: var(--reach-radius-md);
+  transition: all 0.15s ease;
+}
+
+.app-sidebar__nav-link:hover {
+  color: var(--reach-brand);
+  background-color: var(--reach-brand-light);
+}
+
+.app-sidebar__nav-link--active {
+  color: var(--reach-brand);
+  background-color: var(--reach-brand-light);
+  font-weight: 700;
+}
+
+/* Main Content Area */
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Prevents overflow blowout in flex children */
+}
+
+.app-main__container {
+  width: 100%;
+  max-width: var(--reach-content-max-width);
+  margin: 0 auto;
+  padding: 3rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+/* Responsive Desktop Multi-Column Layouts */
+.desktop-split-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .desktop-split-grid {
+    grid-template-columns: 1.2fr 1fr;
+    gap: 2rem;
+    align-items: start;
+  }
+
+  .desktop-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+  }
+}
+
+/* Mobile Header & Drawer */
+.mobile-header {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background-color: var(--reach-bg-surface);
+  border-bottom: 1px solid var(--reach-border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+.mobile-header__logo {
+  color: var(--reach-brand);
+  font-size: 1.35rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.mobile-header__toggle {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--reach-text-primary);
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.mobile-drawer-overlay {
+  display: none;
+}
+
+/* Responsive Breakpoint: Mobile & Tablet */
+@media (max-width: 900px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100vh;
+    z-index: 300;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-in-out;
+  }
+
+  .app-sidebar--open {
+    transform: translateX(0);
+  }
+
+  .mobile-drawer-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 250;
+    backdrop-filter: blur(2px);
+  }
+
+  .app-main__container {
+    padding: 1.5rem 1rem;
+    gap: 1.5rem;
+  }
+
+  .page-intro__title {
+    font-size: 1.75rem;
+  }
+
+  .stat-card__value {
+    font-size: 1.75rem;
+  }
+
+  .incident-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .filter-pills {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .filter-pills__item {
+    flex-shrink: 0;
+  }
+}
