@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30  
 **Baseline package:** `REACH-FULL-HARDENED-FIXED-0008-FRESH.zip`  
-**Sources reviewed:** `REACH_NEXT_FIXES.md`, `GROK_REMAINING_FIXES.md`, `FINAL_LOCAL_AUDIT.md`  
+**Sources reviewed:** consolidated into [HARDENING_LOG.md](./HARDENING_LOG.md)  
 **Environment:** Network-enabled sandbox (no Supabase project credentials, no BMONI partner secrets, no physical Android devices)
 
 ---
@@ -28,7 +28,7 @@
 
 ## 1. FIXED (this session + 0008 baseline)
 
-### 1.1 Already in 0008 package (from FINAL_LOCAL_AUDIT / REACH_NEXT_FIXES)
+### 1.1 Already in 0008 package (per the hardening log)
 1. Backend signup no longer depends on demo mode  
 2. `BMONI_BASE_URL` mandatory + HTTPS-only (no implicit dev endpoint)  
 3. AI authorization before external model call  
@@ -134,7 +134,7 @@ Provide these to continue certification:
 
 ## 5. REQUIRES PHYSICAL DEVICE
 
-From `GROK_REMAINING_FIXES.md` §3 — must run on ≥2 Android phones:
+From [EXTERNAL_CERTIFICATION.md](./EXTERNAL_CERTIFICATION.md) §3 — must run on ≥2 Android phones:
 
 - Offline emergency; A→B→gateway; A→B→C→gateway  
 - Duplicate / modified packet / invalid ECDSA / wrong key / revoked device  

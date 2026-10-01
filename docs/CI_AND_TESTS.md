@@ -10,7 +10,7 @@
 | `npm run build` | `tsc && vite build` |
 
 ## GitHub Actions
-`.github/workflows/ci.yml` — platform build, PWA syntax, migrations, security-static, Android (if wrapper jar present).
+`.github/workflows/ci.yml` — platform build, PWA syntax, migrations, security-static, Android `assembleDebug` + `lint`.
 
 ## Manual / staging harnesses (`tests/`)
 | File | Use |

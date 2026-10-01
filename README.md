@@ -15,7 +15,10 @@ cd reach-platform && npm ci && npm run validate:all && npm run build
 ```
 
 ## Documentation
-See **[docs/README.md](docs/README.md)** for the full index.
+See **[docs/README.md](docs/README.md)** for the full index. Highlights:
+- [docs/REACH_PRODUCTION_STATUS.md](docs/REACH_PRODUCTION_STATUS.md) — authoritative status
+- [docs/HARDENING_LOG.md](docs/HARDENING_LOG.md) — consolidated hardening history
+- [docs/EXTERNAL_CERTIFICATION.md](docs/EXTERNAL_CERTIFICATION.md) — what still needs staging, providers or devices
 
 ## Production honesty
-Source hardening and local validators pass. Live RLS, BMONI sandbox, multi-phone relay, and load/pen tests remain external certification steps (`docs/REACH_PRODUCTION_AUDIT.md`).
+Source hardening and local validators pass. Live RLS, BMONI sandbox, multi-phone relay, and load/pen tests remain external certification steps ([docs/EXTERNAL_CERTIFICATION.md](docs/EXTERNAL_CERTIFICATION.md)).

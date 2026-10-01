@@ -6,7 +6,7 @@
 - `reach-citizen-pwa/` — vanilla-JS citizen emergency PWA (no build step).
 - `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0010`) and the `api` Edge Function (`functions/api/`).
 - `relay-node-android/` — native Android relay (Kotlin). `bmoni-institution-mobile/` — Flutter BMONI signing service.
-- `docs/` — product documentation index (`docs/README.md`). Root-level `*.md` are kept for history.
+- `docs/` — **all** product documentation; start at `docs/README.md`. Keep the root free of loose notes: only `README.md` and `AGENTS.md` live there. Merge new fix logs into `docs/HARDENING_LOG.md` and release notes into `docs/RELEASE_NOTES.md` rather than adding another root `*_FIXES.md`.
 - `tests/` — RLS, BMONI webhook, load (k6) and AI-calibration harnesses.
 - `.github/workflows/ci.yml` — CI gates (platform, PWA syntax, migration order, android, security scripts).
 

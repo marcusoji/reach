@@ -20,10 +20,9 @@
 - validate + hardening + security-static
 - PWA JS syntax
 - Migration presence
-- Android assemble (when wrapper jar committed)
+- Android `assembleDebug` + `lint` (wrapper jar is committed)
 
 ## Known limitations (honest)
-- Gradle wrapper **jar** must be generated on a machine with Gradle once
 - Physical relay, live BMONI, load, and pen tests require staging credentials and devices
 - Custom Realtime client improved but not fully replaced by official supabase-js channel API
 - AI is advisory Safety Fusion Confidence until calibration dataset exists

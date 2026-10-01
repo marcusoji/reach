@@ -4,16 +4,12 @@
 **Migrations:** 0001–0010  
 **Last updated:** 2026-10-01  
 
-This is the **authoritative** status document. Older audit/fix/next-fix notes have been archived out of the package root.
-
-
-# REACH Production Status — Phase 1 Hardening Package
-
-**Package:** reach-main + Phase 1 critical fixes  
-**Date:** 2026-10-01  
+This is the **authoritative** status document. Older audit/fix/next-fix notes
+have been consolidated into [HARDENING_LOG.md](./HARDENING_LOG.md) and
+[RELEASE_NOTES.md](./RELEASE_NOTES.md).
 
 ## What this package is
-Integrated MVP: `reach-platform` (React), `reach-citizen-pwa`, `relay-node-android`, Supabase migrations `0001`–`0009`.
+Integrated MVP: `reach-platform` (React), `reach-citizen-pwa`, `relay-node-android`, Supabase migrations `0001`–`0010`.
 
 ## Phase 1 implemented in this build
 
