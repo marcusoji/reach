@@ -341,7 +341,10 @@ An institution admin does this once:
    wallet address.
 7. **Get deposit account** — `GET .../bank-accounts/deposit-accounts/NGN`.
 8. **Create proposal** — `POST .../smart-wallets/{walletId}/proposals`.
-9. **Get sign payload** — `GET .../proposals/{id}/sign-payload`.
+9. **Get sign payload** — `GET .../proposals/{id}/sign-payload`. The digest is
+    in **`signingPayloadHash`** — not `hashToSign` or `payload`, which the BMONI
+    docs name but the API does not return. It is not always ready on the first
+    call; retry on `409 E201` until it returns 200.
 10. **Sign the payment hash** on the device — Flutter `signTransactionHash(hashHex, pin)`.
     This signs the **raw 32-byte hash**, not an EIP-191 message.
 11. **Submit signature** — `POST .../proposals/{id}/sign`.
@@ -350,6 +353,12 @@ An institution admin does this once:
 The device-side half is `bmoni-institution-mobile/lib/bmoni_signing_service.dart`.
 Everything else is `reach-platform/supabase/functions/api/bmoni.ts` and is already
 wired into the API.
+
+**Read [BMONI_INTEGRATION_NOTES.md](./BMONI_INTEGRATION_NOTES.md) before debugging
+anything here.** It records the field names and error codes the sandbox actually
+returns, which differ from BMONI's published docs in several places — including
+the sign-payload field name above, the KYC address shape, and which sandbox
+persona works.
 
 ### 7.6 Test it without a live partner key
 
@@ -378,6 +387,27 @@ curl -i -X POST \
 ```
 
 Then flip one byte of `$SIG` and confirm you get 401.
+
+### 7.7 Sandbox testing
+
+Verified against the live sandbox — see
+[BMONI_INTEGRATION_NOTES.md](./BMONI_INTEGRATION_NOTES.md) for detail.
+
+- **Use the Bunch Dillon persona** (BVN `95888168924`, name `Bunch` / `Dillon`).
+  It is the only one that works: the Samson Jabo BVN `22222222222` returns
+  `404 E501` and its rail never activates, despite the BMONI docs calling it
+  valid.
+- **Use a unique phone number.** The documented persona phone
+  `+2348000000000` is already taken and returns `409`.
+- **Verify the BVN resolves first** with `GET .../kyc/bvn-lookup/{bvn}`.
+  `start-nigeria` returns `hasBvn: true` even when the BVN did not resolve, so
+  that flag alone is not proof the persona matched.
+- **Poll until the rail is active.** `start-nigeria` is asynchronous: read
+  `GET .../onboarding/status` until `anchorStatus == "active"` (about 30s) before
+  expecting a dedicated NGN deposit account.
+- **The shared sandbox key is not tenant-scoped.** It exposes ~941 users across
+  other teams and returns the partner webhook secret in plaintext. Treat all
+  sandbox data as public and keep real personal data out of it.
 
 ---
 

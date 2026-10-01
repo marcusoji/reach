@@ -11,7 +11,9 @@
    `/functions/v1/api/webhooks/bmoni`
 4. Use the BMONI webhook secret returned by BMONI for verification.
 5. Test entirely in BMONI sandbox first.
-6. Use the documented sandbox persona only in sandbox.
+6. Use the Bunch Dillon sandbox persona (`95888168924`) only. The Samson Jabo
+   persona (`22222222222`) does not resolve on the sandbox host and its rail
+   never activates — see `BMONI_INTEGRATION_NOTES.md`.
 7. Replace sandbox API/base URL and credentials with production values only during production cutover.
 8. Verify an institution can complete onboarding and a subscription payment.
 9. Verify a citizen, staff member and security-desk user cannot access institution billing endpoints.

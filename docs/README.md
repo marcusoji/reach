@@ -18,6 +18,7 @@
 | [SETUP_GUIDE.md](./SETUP_GUIDE.md) | Step-by-step setup (package to staging) |
 | [CI_AND_TESTS.md](./CI_AND_TESTS.md) | CI jobs and test harnesses |
 | [BMONI_DEPLOYMENT.md](./BMONI_DEPLOYMENT.md) | BMONI deploy notes |
+| [BMONI_INTEGRATION_NOTES.md](./BMONI_INTEGRATION_NOTES.md) | **Verified sandbox behaviour** — where BMONI's docs differ from the API |
 | [BMONI_INSTITUTION_BILLING.md](./BMONI_INSTITUTION_BILLING.md) | Institutional billing model |
 
 ## Architecture and history

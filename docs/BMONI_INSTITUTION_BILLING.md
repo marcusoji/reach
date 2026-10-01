@@ -37,7 +37,9 @@ Institution Subscription
 7. Read onboarding status / NGN deposit account.
 8. Create a REACH institutional subscription transfer proposal.
 9. Approve the proposal.
-10. Retrieve the sign payload.
+10. Retrieve the sign payload — read the digest from `signingPayloadHash`.
+    BMONI's docs name `hashToSign` / `payload`, but the API returns neither;
+    reading the wrong field stores `null` and fails silently.
 11. Sign the raw transaction hash with `signTransactionHash` on the payer device.
 12. Submit the signature.
 13. Confirm settlement through the BMONI webhook/status mechanism.
