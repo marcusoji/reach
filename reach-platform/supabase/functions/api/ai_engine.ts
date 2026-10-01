@@ -22,8 +22,14 @@ export function assessEvidence(input:{reportedCategory?:string;userConfirmed?:bo
   const evidence=cleanEvidence(input.evidence); const scores:Record<Category,number>=Object.fromEntries(CATEGORIES.map(c=>[c,PRIOR])) as Record<Category,number>;
   let support=0, contradiction=0, independentSources=new Set<string>(); const reasons:string[]=[];
   for(const e of evidence){
-    const q=clamp(Number(e.quality??1)); const c=conf(e.confidence??0); const w=(WEIGHT[e.kind]??.3)*q*ageFactor(e.timestamp); const contribution=w*c;
-    support+=contribution; if(e.contradiction)contradiction+=w; if(e.source)independentSources.add(e.source);
+    const q=clamp(Number(e.quality??1)); const c=conf(e.confidence??0); const w=(WEIGHT[e.kind]??.3)*q*ageFactor(e.timestamp);
+    // Contradicting evidence must only reduce confidence: it feeds the penalty and nothing
+    // else. Counting it as support (or into its own category score) made confidence rise
+    // with the number of contradicting sensors, so an item flagged contradiction:true could
+    // push the decision to 'recommend'.
+    if(e.contradiction){contradiction+=w;continue;}
+    const contribution=w*c;
+    support+=contribution; if(e.source)independentSources.add(e.source);
     if(e.category&&CATEGORIES.includes(e.category as Category)) scores[e.category as Category]+=contribution*(e.corroborates===false?.45:1);
   }
   if(input.reportedCategory&&CATEGORIES.includes(input.reportedCategory as Category)) scores[input.reportedCategory as Category]+=input.userConfirmed===true?.45:.22;
