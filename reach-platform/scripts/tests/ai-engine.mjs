@@ -318,10 +318,15 @@ S('F. Model second-opinion behaviour');
 // ------------------------------------------------------- G: provider adapter
 S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
 {
-  const { modelAssist } = await loadTs('ai_provider.ts');
+  // Deno.env is read at module load (breaker/timeout config), so the stub must exist first.
+  globalThis.Deno = { env: { get: () => undefined } };
+  const { modelAssist, aiCircuitSnapshot, resetAiCircuit } = await loadTs('ai_provider.ts');
   const realFetch = globalThis.fetch;
   const setEnv = (o) => { globalThis.Deno = { env: { get: (k) => o[k] } }; };
   const okResponse = (obj) => ({ ok: true, json: async () => obj });
+  const configured = { REACH_AI_ENDPOINT: 'https://x/ai', REACH_AI_API_KEY: 'k', REACH_AI_MODEL: 'm' };
+  // Failures accumulate in module state, so clear the breaker before each independent check.
+  const fresh = (o = configured) => { resetAiCircuit(); setEnv(o); };
 
   setEnv({});
   ck('returns null when unconfigured', (await modelAssist({ evidence: [] })) === null);
@@ -330,7 +335,7 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
   setEnv({ REACH_AI_ENDPOINT: 'https://x/ai', REACH_AI_API_KEY: 'k' });
   ck('returns null with only 2 of 3 vars', (await modelAssist({ evidence: [] })) === null);
 
-  setEnv({ REACH_AI_ENDPOINT: 'https://x/ai', REACH_AI_API_KEY: 'k', REACH_AI_MODEL: 'm' });
+  fresh();
 
   globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 88, rationale: 'smoke', evidence_labels: ['a'] }) } }] });
   {
@@ -341,26 +346,33 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
   globalThis.fetch = async () => okResponse({ output: { category: 'medical', confidence: 40, rationale: 'r', evidence_labels: [] } });
   ck('accepts {output:{...}} shape', (await modelAssist({ evidence: [] }))?.category === 'medical');
 
+  fresh();
   globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'bogus', confidence: 50 }) } }] });
   ck('rejects invalid category', (await modelAssist({ evidence: [] })) === null);
 
+  fresh();
   globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 'nope' }) } }] });
   ck('rejects non-numeric confidence', (await modelAssist({ evidence: [] })) === null);
 
+  fresh();
   globalThis.fetch = async () => okResponse({ choices: [{ message: { content: '{not json' } }] });
   ck('rejects malformed JSON', (await modelAssist({ evidence: [] })) === null);
 
+  fresh();
   globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
   ck('returns null on provider error status', (await modelAssist({ evidence: [] })) === null);
 
+  fresh();
   globalThis.fetch = async () => { throw new Error('network down'); };
   ck('returns null when fetch throws', (await modelAssist({ evidence: [] })) === null);
 
   // confidence clamping: provider sends 250 -> clamped to 100
+  fresh();
   globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 250 }) } }] });
   ck('provider confidence clamped to 100', (await modelAssist({ evidence: [] }))?.confidence === 100);
 
   // retry: first attempt fails, second succeeds
+  fresh();
   {
     let calls = 0;
     globalThis.fetch = async () => { calls++; if (calls === 1) throw new Error('transient'); return okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 70 }) } }] }); };
@@ -368,6 +380,7 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
     ck('retries once on transient failure', r?.category === 'fire' && calls === 2, `calls=${calls}`);
   }
   // evidence truncated to 30
+  fresh();
   {
     let seen = 0;
     globalThis.fetch = async (_u, init) => { seen = JSON.parse(init.body).messages[1].content.length; return okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 70 }) } }] }); };
@@ -375,12 +388,65 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
     ck('provider payload is bounded', seen < 5000, `payload chars=${seen}`);
   }
   // provider never authorizes: result is advisory only, engine still decides
+  fresh();
   {
     globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'security', confidence: 99, rationale: 'trust me' }) } }] });
     const m = await modelAssist({ evidence: [] });
     const r = assessEvidence({ evidence: [], modelAssist: m ? { category: m.category, confidence: m.confidence / 100 } : null });
     ck('a confident model cannot force a recommend on empty evidence', r.abstain === true, `decision=${r.decision}`);
   }
+
+  // ---- circuit breaker ----
+  {
+    fresh({ ...configured, REACH_AI_BREAKER_THRESHOLD: '3', REACH_AI_BREAKER_COOLDOWN_MS: '60000' });
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; throw new Error('provider down'); };
+    for (let i = 0; i < 3; i++) await modelAssist({ evidence: [] });
+    const afterOpen = calls;
+    const snap = aiCircuitSnapshot();
+    ck('breaker opens after threshold consecutive failures', snap.open === true && snap.failures >= 3, `failures=${snap.failures} calls=${afterOpen}`);
+    // subsequent calls are skipped entirely (no fetch)
+    for (let i = 0; i < 5; i++) await modelAssist({ evidence: [] });
+    ck('breaker skips the provider while open (no extra calls)', calls === afterOpen, `calls went ${afterOpen} -> ${calls}`);
+    ck('breaker returns null while open', (await modelAssist({ evidence: [] })) === null);
+    // a success closes the breaker
+    resetAiCircuit();
+    globalThis.fetch = async () => { throw new Error('down'); };
+    for (let i = 0; i < 2; i++) await modelAssist({ evidence: [] });
+    ck('two failures do not open the breaker', aiCircuitSnapshot().open === false, `failures=${aiCircuitSnapshot().failures}`);
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 70 }) } }] });
+    const recovered = await modelAssist({ evidence: [] });
+    ck('a success closes the breaker', recovered?.category === 'fire' && aiCircuitSnapshot().open === false);
+  }
+  // ---- abort / timeout path: a fetch that honours the abort signal ----
+  {
+    fresh({ ...configured, REACH_AI_TIMEOUT_MS: '60' });
+    // Real fetch rejects immediately when the signal is already aborted; the stub must too,
+    // otherwise the retry attempt waits on an event that has already fired.
+    globalThis.fetch = (_u, init) => new Promise((_res, rej) => {
+      const abortErr = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+      if (init.signal.aborted) return rej(abortErr());
+      init.signal.addEventListener('abort', () => rej(abortErr()));
+    });
+    const t0 = Date.now();
+    const r = await modelAssist({ evidence: [] });
+    const dt = Date.now() - t0;
+    ck('timeout aborts the provider call', r === null, `took ${dt}ms`);
+    ck('timeout fires near the configured limit, not 6.5s', dt < 500, `took ${dt}ms`);
+    ck('an aborted call counts as a failure', aiCircuitSnapshot().failures >= 1, `failures=${aiCircuitSnapshot().failures}`);
+  }
+  // ---- breaker keeps the engine working when the provider is dead ----
+  {
+    fresh({ ...configured, REACH_AI_BREAKER_THRESHOLD: '2' });
+    globalThis.fetch = async () => { throw new Error('down'); };
+    await modelAssist({ evidence: [] });
+    await modelAssist({ evidence: [] });
+    const m = await modelAssist({ evidence: [] });
+    const r = assessEvidence({ reportedCategory: 'fire', userConfirmed: true, evidence: [{ id: '1', kind: 'user_report', category: 'fire', confidence: 0.9, quality: 1, source: 'c1', timestamp: new Date().toISOString() }], modelAssist: m ? { category: m.category, confidence: m.confidence / 100 } : null });
+    ck('engine still produces an assessment with a dead provider', Number.isFinite(r.confidence) && r.category === 'fire', `conf=${r.confidence} model_agreement=${r.model_agreement}`);
+    ck('dead provider is reported as model_agreement=none', r.model_agreement === 'none');
+  }
+  resetAiCircuit();
   globalThis.fetch = realFetch;
 }
 
