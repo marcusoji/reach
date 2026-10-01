@@ -54,3 +54,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - Privileged Bluetooth/Wi-Fi Direct calls are gated by `Permissions.kt`; the transports carry
   `@SuppressLint("MissingPermission")` because lint cannot follow the `permissions()` helper. Do not
   remove those gates — `RelayService.startRelay()` and `WifiDirectRelay.sendWithAck()` fail closed.
+- Relay packet signing has one invariant that is easy to break: the signed payload must NOT contain `x`.
+  `x` is defined as `sha256(signed payload)`, so embedding `x` in it is self-referential and no packet can
+  satisfy verification. `x` still binds every other field, and the ECDSA signature over the signed payload
+  binds `x`. The canonical form is duplicated in three places that must agree exactly —
+  `supabase/functions/api/relay_protocol.ts`, `reach-citizen-pwa/js/relay/protocol.js`, and
+  `relay-node-android/.../DeviceIdentity.kt` — so change all three together.
+- `crypto.subtle.sign()` returns an `ArrayBuffer`, not a `Uint8Array`. Anything that indexes the signature
+  bytes (e.g. `p1363ToDer`) must normalise with `new Uint8Array(raw)` first.
+- `minimal_payload` keys must stay snake_case (`location_label`, `location_source`, `location_accuracy_m`):
+  `ingest_relay_packet_service` reads those exact names, and camelCase silently drops location data.
+- `reach-citizen-pwa/js/relay/test-protocol.mjs` needs an `indexedDB` shim to run under Node; it is wired
+  into the `pwa` CI job, so it now actually executes (it previously only ever crashed).
