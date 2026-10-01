@@ -9,6 +9,13 @@ const API_URL = (cfg.API_URL || `${SUPABASE_URL}/functions/v1/api`).replace(/\/$
 const SESSION_KEY = 'reach_pwa_session';
 const DB_NAME = 'reach-offline';
 const STORE = 'incident-queue';
+const QUEUE_STATE_QUEUED = 'queued';
+const QUEUE_STATE_RETRYING = 'retrying';
+const QUEUE_STATE_DEAD = 'dead_letter';
+const QUEUE_STATE_EXPIRED = 'expired';
+const QUEUE_STATE_SENT = 'sent';
+const QUEUE_MAX_ATTEMPTS = 8;
+
 const QUEUE_MAX_ITEMS = 100;
 const QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
 const backendConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -65,10 +72,47 @@ export async function getIncident(id){return (await api(`/incidents/${encodeURIC
 export async function updateProfile(patch){return (await api('/me',{method:'PATCH',body:JSON.stringify(patch)})).data;}
 export async function queueIncident(payload,idempotencyKey){const db=await openDb();const now=Date.now();await purgeExpired(db,now);const items=await allQueuedFromDb(db);if(items.length>=QUEUE_MAX_ITEMS){throw new Error('Offline emergency queue is full; reconnect to send pending emergencies before creating another queued report.');}await put(db,{id:idempotencyKey,payload,idempotencyKey,createdAt:now,attempts:0,nextAttemptAt:now});}
 export async function flushQueue(){
-  if(!backendConfigured || !navigator.onLine || !hasSession()) return {sent:0,remaining:await queueCount()};
-  const db=await openDb();await purgeExpired(db,Date.now());const items=await allQueuedFromDb(db);let sent=0;
-  for(const item of items.sort((a,b)=>a.createdAt-b.createdAt)){if(item.nextAttemptAt&&item.nextAttemptAt>Date.now())continue;try{const incident=await createIncident(item.payload,item.idempotencyKey);await removeQueued(item.id);localStorage.setItem('reach_last_incident',JSON.stringify({id:incident.id,code:incident.code}));if(appState.emergency.incidentId===item.idempotencyKey) { appState.emergency.incidentId=incident.id; appState.emergency.incidentCode=incident.code; }sent++;}catch{await markAttempt(db,item);break;}}
-  return {sent,remaining:await queueCount()};
+  if(!backendConfigured || !navigator.onLine || !hasSession()) return {sent:0,remaining:await queueCount(),dead:0};
+  const db=await openDb();
+  await purgeExpired(db,Date.now());
+  const items=await allQueuedFromDb(db);
+  let sent=0, dead=0;
+  for(const item of items.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))){
+    if(item.state===QUEUE_STATE_DEAD || item.state===QUEUE_STATE_SENT) continue;
+    if(item.nextAttemptAt && item.nextAttemptAt>Date.now()) continue;
+    // Expired by TTL
+    if(item.createdAt && Date.now()-item.createdAt>QUEUE_TTL_MS){
+      item.state=QUEUE_STATE_EXPIRED;
+      await put(db,item);
+      continue;
+    }
+    try{
+      item.state=QUEUE_STATE_RETRYING;
+      await put(db,item);
+      const incident=await createIncident(item.payload,item.idempotencyKey);
+      await removeQueued(item.id);
+      localStorage.setItem('reach_last_incident',JSON.stringify({id:incident.id,code:incident.code}));
+      if(appState.emergency && appState.emergency.incidentId===item.idempotencyKey){
+        appState.emergency.incidentId=incident.id;
+        appState.emergency.incidentCode=incident.code;
+      }
+      sent++;
+    }catch(err){
+      const attempts=(item.attempts||0)+1;
+      item.attempts=attempts;
+      item.lastError=String(err&&err.message||err).slice(0,300);
+      if(attempts>=QUEUE_MAX_ATTEMPTS){
+        item.state=QUEUE_STATE_DEAD;
+        item.deadAt=Date.now();
+        dead++;
+      }else{
+        item.state=QUEUE_STATE_RETRYING;
+        item.nextAttemptAt=Date.now()+Math.min(120000,1000*Math.pow(2,attempts));
+      }
+      await put(db,item);
+    }
+  }
+  return {sent,remaining:await queueCount(),dead};
 }
 function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains('sync-meta'))db.createObjectStore('sync-meta',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
 function put(db,value){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
@@ -112,3 +156,38 @@ export async function addContact(contact){return (await api('/contacts',{method:
 export async function deleteContact(id){await api(`/contacts/${encodeURIComponent(id)}`,{method:'DELETE'});}
 export async function getRelayCapabilities(){ return detectRelayCapabilities(); }
 export function initBackendSync(){window.addEventListener('online',()=>{void flushQueue();});window.setInterval(()=>{if(navigator.onLine)void flushQueue();},30000);void flushQueue();}
+
+
+/** Mark offline queue item dead after max attempts — never silent discard. */
+export async function markQueueDead(id, reason) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const req = tx.objectStore(STORE).get(id);
+    req.onsuccess = () => {
+      const row = req.result;
+      if (!row) return resolve(false);
+      row.state = QUEUE_STATE_DEAD;
+      row.lastError = String(reason || 'max_attempts').slice(0, 300);
+      row.deadAt = Date.now();
+      tx.objectStore(STORE).put(row);
+    };
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function listDeadLetter() {
+  const items = await allQueued().catch(() => []);
+  return items.filter((i) => i.state === QUEUE_STATE_DEAD || i.state === 'dead_letter');
+}
+
+
+/** Call on app start after login — recovers browser-restart queue safely (idempotent keys). */
+export function resumeOfflineQueue(){
+  if(typeof window==='undefined') return;
+  const run=()=>{ if(navigator.onLine && hasSession()) flushQueue().catch(()=>{}); };
+  window.addEventListener('online', run);
+  // Deferred resume after sign-in
+  setTimeout(run, 1500);
+}

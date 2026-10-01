@@ -1,0 +1,76 @@
+name: REACH CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+jobs:
+  platform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reach-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: reach-platform/package-lock.json
+      - run: npm ci
+      - run: npm run validate
+      - run: npm run validate:hardening
+      - run: npm run build
+        env:
+          VITE_REACH_DEMO_MODE: 'false'
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://example.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'public-anon-placeholder' }}
+
+  pwa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax-check PWA JS
+        run: |
+          for f in reach-citizen-pwa/js/*.js reach-citizen-pwa/js/relay/*.js; do
+            [ -f "$f" ] && node --check "$f"
+          done
+
+  sql-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check migration order
+        run: |
+          ls reach-platform/supabase/migrations/*.sql | sort
+          test -f reach-platform/supabase/migrations/0001_reach_mvp.sql
+          test -f reach-platform/supabase/migrations/0010_phase3_reliability.sql
+
+  android:
+    runs-on: ubuntu-latest
+    if: hashFiles('relay-node-android/gradle/wrapper/gradle-wrapper.jar') != ''
+    defaults:
+      run:
+        working-directory: relay-node-android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: chmod +x gradlew
+      - run: ./gradlew assembleDebug lint --stacktrace
+
+  security-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run static security checks
+        run: node reach-platform/scripts/tests/security-static.mjs

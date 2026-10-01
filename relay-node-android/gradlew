@@ -1,0 +1,13 @@
+#!/bin/sh
+# Minimal Gradle wrapper bootstrap — downloads wrapper jar on first run if missing.
+set -e
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+PROPS="$APP_HOME/gradle/wrapper/gradle-wrapper.properties"
+if [ ! -f "$WRAPPER_JAR" ]; then
+  echo "gradle-wrapper.jar missing. Generate on a machine with Gradle:"
+  echo "  cd relay-node-android && gradle wrapper --gradle-version 8.7"
+  echo "Or download a standard wrapper jar into gradle/wrapper/"
+  exit 1
+fi
+exec java -jar "$WRAPPER_JAR" "$@"

@@ -1,107 +1,164 @@
 package com.reach.relay
 
-import android.Manifest
-import android.content.*
-import android.content.pm.PackageManager
-import android.net.Network
-import android.net.wifi.p2p.*
-import android.os.Build
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.Handler
 import android.os.Looper
-import androidx.core.content.ContextCompat
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
+import kotlin.concurrent.thread
 
-/** Real Android Wi-Fi Direct transport. Discovery, connection, group-owner negotiation and bounded TCP transfer. */
+/**
+ * Wi-Fi Direct framed transfer with application-level ACK.
+ * Frame: [4-byte length][payload]
+ * After send, wait for ACK frame; only then report success.
+ */
 class WifiDirectRelay(private val context: Context) {
-    companion object { const val PORT = 38471; const val SERVICE_NAME = "_reach-relay._tcp" }
-    private val manager=context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
-    private val channel=manager.initialize(context, Looper.getMainLooper(), null)
-    private val executor=Executors.newCachedThreadPool()
-    private var server:ServerSocket?=null
-    private var network:Network?=null
-    private var receiver:BroadcastReceiver?=null
-    private var peers:List<WifiP2pDevice> = emptyList()
-    private var onReady:(String?)->Unit={}
+    private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
+    private val channel = manager?.initialize(context, context.mainLooper, null)
+    private val executor = Executors.newSingleThreadExecutor()
+    private val handler = Handler(Looper.getMainLooper())
+    private var server: ServerSocket? = null
 
-    fun start(onPeers:(List<WifiP2pDevice>)->Unit, onPacket:(ByteArray)->Unit, onReady:(String?)->Unit={}) {
-        this.onReady=onReady
-        require(permissionGranted()) { "Wi-Fi Direct permission is not granted" }
-        receiver = object: BroadcastReceiver(){
-            override fun onReceive(c:Context?, intent:Intent?) {
-                when(intent?.action){
-                    WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> manager.requestPeers(channel){ peers=it.deviceList.toList(); onPeers(peers) }
-                    WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> requestConnection(onPacket)
-                }
-            }
+    fun send(packet: ByteArray, onComplete: (Boolean) -> Unit = {}) {
+        sendWithAck(packet, "", "") { ok, _ -> onComplete(ok) }
+    }
+
+    fun sendWithAck(
+        packet: ByteArray,
+        packetId: String,
+        packetHash: String,
+        onComplete: (Boolean, String?) -> Unit
+    ) {
+        if (manager == null || channel == null) {
+            onComplete(false, null); return
         }
-        val filter=IntentFilter().apply{
-            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+        if (packet.size > RelayProtocol.MAX_PACKET_BYTES) {
+            onComplete(false, null); return
         }
-        context.registerReceiver(receiver,filter)
-        discover(onPeers)
-    }
-
-    fun discover(onPeers:(List<WifiP2pDevice>)->Unit){
-        if(!permissionGranted()) return
-        manager.discoverPeers(channel, object:WifiP2pManager.ActionListener{ override fun onSuccess(){}; override fun onFailure(_:Int){} })
-        manager.requestPeers(channel){ peers=it.deviceList.toList(); onPeers(peers) }
-    }
-
-    fun connect(device:WifiP2pDevice, onResult:(Boolean)->Unit = {}) {
-        if(!permissionGranted()) { onResult(false); return }
-        val config=WifiP2pConfig().apply{ deviceAddress=device.deviceAddress; wps.setup=android.net.wifi.WpsInfo.PBC }
-        manager.connect(channel,config,object:WifiP2pManager.ActionListener{ override fun onSuccess(){onResult(true)}; override fun onFailure(_:Int){onResult(false)} })
-    }
-
-    private fun requestConnection(onPacket:(ByteArray)->Unit){
-        if(!permissionGranted()) return
-        manager.requestConnectionInfo(channel){ info ->
-            if(!info.groupFormed) return@requestConnectionInfo
-            if(info.isGroupOwner) { startLocalServer(onPacket); onReady(null) }
-            else if(info.groupOwnerAddress != null) { network = null; onReady(info.groupOwnerAddress.hostAddress) }
-        }
-    }
-
-    fun startLocalServer(onPacket:(ByteArray)->Unit){
-        if(server?.isClosed == false) return
-        executor.execute{
-            try{
-                server=ServerSocket(PORT)
-                while(server?.isClosed == false){
-                    server!!.accept().use { socket ->
-                        socket.soTimeout=5000
-                        val input=BufferedInputStream(socket.getInputStream())
-                        val header=ByteArray(4); if(input.readFully(header)!=4) return@use
-                        val n=((header[0].toInt() and 255) shl 24) or ((header[1].toInt() and 255) shl 16) or ((header[2].toInt() and 255) shl 8) or (header[3].toInt() and 255)
-                        if(n !in 1..RelayProtocol.MAX_BYTES) return@use
-                        val body=ByteArray(n); if(input.readFully(body)!=n) return@use
-                        onPacket(body)
+        val peers = mutableListOf<WifiP2pDevice>()
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action == WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION) {
+                    manager.requestPeers(channel) { list ->
+                        peers.clear()
+                        peers.addAll(list.deviceList)
                     }
                 }
-            }catch(_:Exception){}
+            }
+        }
+        try {
+            context.registerReceiver(receiver, IntentFilter(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION))
+        } catch (_: Exception) {}
+        manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {}
+            override fun onFailure(reason: Int) {
+                safeUnregister(receiver)
+                onComplete(false, null)
+            }
+        })
+        handler.postDelayed({
+            safeUnregister(receiver)
+            val peer = peers.firstOrNull()
+            if (peer == null) {
+                onComplete(false, null); return@postDelayed
+            }
+            val config = WifiP2pConfig().apply { deviceAddress = peer.deviceAddress }
+            manager.connect(channel, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    manager.requestConnectionInfo(channel) { info ->
+                        if (info == null || !info.groupFormed) {
+                            onComplete(false, peer.deviceAddress); return@requestConnectionInfo
+                        }
+                        executor.execute {
+                            var ok = false
+                            try {
+                                val host = if (info.isGroupOwner) "127.0.0.1" else info.groupOwnerAddress.hostAddress
+                                Socket().use { socket ->
+                                    socket.soTimeout = RelayProtocol.ACK_TIMEOUT_MS.toInt()
+                                    socket.connect(InetSocketAddress(host, 8988), 8_000)
+                                    val out = DataOutputStream(socket.getOutputStream())
+                                    out.writeInt(packet.size)
+                                    out.write(packet)
+                                    out.flush()
+                                    val inp = DataInputStream(socket.getInputStream())
+                                    val ackLen = inp.readInt()
+                                    require(ackLen in 16..4096)
+                                    val ackBytes = ByteArray(ackLen)
+                                    inp.readFully(ackBytes)
+                                    val ack = RelayProtocol.parseAck(ackBytes)
+                                    ok = if (packetId.isNotBlank() && packetHash.isNotBlank()) {
+                                        RelayProtocol.verifyAck(ack, packetId, packetHash)
+                                    } else ack.optBoolean("accepted", false)
+                                }
+                            } catch (_: Exception) {
+                                ok = false
+                            }
+                            handler.post { onComplete(ok, peer.deviceAddress) }
+                        }
+                    }
+                }
+                override fun onFailure(reason: Int) {
+                    onComplete(false, peer.deviceAddress)
+                }
+            })
+        }, 4_000)
+    }
+
+    /** Start group-owner style listener that validates, enqueues, returns ACK. */
+    fun startAckServer(context: Context, onPacket: (org.json.JSONObject) -> Unit) {
+        thread(isDaemon = true, name = "reach-wifi-ack") {
+            try {
+                server = ServerSocket(8988).also { it.soTimeout = 0 }
+                while (!Thread.currentThread().isInterrupted) {
+                    try {
+                        server?.accept()?.use { socket ->
+                            socket.soTimeout = RelayProtocol.ACK_TIMEOUT_MS.toInt()
+                            val inp = DataInputStream(socket.getInputStream())
+                            val len = inp.readInt()
+                            require(len in 32..RelayProtocol.MAX_PACKET_BYTES)
+                            val raw = ByteArray(len)
+                            inp.readFully(raw)
+                            var accepted = false
+                            var id = ""
+                            var hash = ""
+                            var reason = ""
+                            try {
+                                val packet = RelayProtocol.validate(raw)
+                                id = packet.optString("k")
+                                hash = packet.optString("x")
+                                onPacket(packet)
+                                accepted = true
+                            } catch (e: Exception) {
+                                reason = e.message ?: "reject"
+                            }
+                            val ack = RelayProtocol.buildAck(id.ifBlank { "unknown" }, hash.ifBlank { "0".repeat(64) }, accepted, reason)
+                            val out = DataOutputStream(socket.getOutputStream())
+                            out.writeInt(ack.size)
+                            out.write(ack)
+                            out.flush()
+                        }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
         }
     }
 
-    fun send(host:String, packet:ByteArray, timeoutMs:Int=5000, onComplete:(Boolean)->Unit={} ){
-        require(packet.size in 1..RelayProtocol.MAX_BYTES)
-        executor.execute{ try{
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(host,PORT),timeoutMs); socket.soTimeout=timeoutMs
-                val out=BufferedOutputStream(socket.getOutputStream()); val n=packet.size
-                out.write(byteArrayOf((n ushr 24).toByte(),(n ushr 16).toByte(),(n ushr 8).toByte(),n.toByte())); out.write(packet); out.flush(); onComplete(true)
-            }
-        }catch(_:Exception){ onComplete(false) } }
+    fun close() {
+        try { server?.close() } catch (_: Exception) {}
+        server = null
     }
 
-    private fun permissionGranted():Boolean = if(Build.VERSION.SDK_INT>=33) ContextCompat.checkSelfPermission(context,Manifest.permission.NEARBY_WIFI_DEVICES)==PackageManager.PERMISSION_GRANTED else ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED
-
-    fun close(){ try{receiver?.let{context.unregisterReceiver(it)}}catch(_:Exception){}; try{server?.close()}catch(_:Exception){} }
-
-    private fun java.io.InputStream.readFully(buf:ByteArray):Int { var off=0; while(off<buf.size){ val r=read(buf,off,buf.size-off); if(r<0)return off; off+=r }; return off }
+    private fun safeUnregister(receiver: BroadcastReceiver) {
+        try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+    }
 }

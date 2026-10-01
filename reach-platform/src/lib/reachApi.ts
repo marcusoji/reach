@@ -22,12 +22,52 @@ function authHeaders(accessToken?: string): Record<string, string> {
   };
 }
 
+/**
+ * Session storage hardening:
+ * - access_token preferred in sessionStorage (tab-scoped)
+ * - refresh_token kept in localStorage for continuity across reloads
+ * - never put tokens in URLs
+ * - logout clears both stores
+ */
+const ACCESS_KEY = 'reach_access_session';
+const REFRESH_KEY = 'reach_refresh_session';
+
 export function getStoredSession(): ReachSession | null {
-  try { const raw = localStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  try {
+    const accessRaw = sessionStorage.getItem(ACCESS_KEY) || localStorage.getItem(SESSION_KEY);
+    if (!accessRaw) return null;
+    const session = JSON.parse(accessRaw) as ReachSession;
+    if (!session?.access_token) return null;
+    // Merge refresh from durable store if missing
+    if (!session.refresh_token) {
+      try {
+        const r = localStorage.getItem(REFRESH_KEY);
+        if (r) session.refresh_token = JSON.parse(r).refresh_token;
+      } catch { /* ignore */ }
+    }
+    return session;
+  } catch {
+    return null;
+  }
 }
 
 export function storeSession(session: ReachSession | null) {
-  try { if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session)); else localStorage.removeItem(SESSION_KEY); } catch { /* unavailable storage */ }
+  try {
+    if (!session) {
+      sessionStorage.removeItem(ACCESS_KEY);
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(REFRESH_KEY);
+      return;
+    }
+    // Tab-scoped access token
+    sessionStorage.setItem(ACCESS_KEY, JSON.stringify(session));
+    // Durable refresh only (minimize long-lived access token exposure)
+    if (session.refresh_token) {
+      localStorage.setItem(REFRESH_KEY, JSON.stringify({ refresh_token: session.refresh_token, user: session.user }));
+    }
+    // Legacy key cleared to avoid dual full-token copies
+    localStorage.removeItem(SESSION_KEY);
+  } catch { /* unavailable storage */ }
 }
 
 function sessionFromAuth(data: any): ReachSession {
@@ -181,12 +221,19 @@ export function subscribeToIncidentChanges(onChange: () => void): () => void {
         if (message.event === 'postgres_changes') onChange();
       } catch { /* ignore malformed frames */ }
     };
-    socket.onclose = () => {
+        socket.onclose = () => {
       if (heartbeat) window.clearInterval(heartbeat);
       if (stopped) return;
-      const delay = Math.min(10000, [1000,2000,5000,10000][attempt] ?? 10000); attempt += 1;
-      reconnectTimer = window.setTimeout(() => void connect(), delay);
+      // Exponential backoff + force token refresh before resubscribe
+      const delay = Math.min(30000, Math.round(1000 * Math.pow(1.8, attempt)));
+      attempt += 1;
+      reconnectTimer = window.setTimeout(async () => {
+        try { await refreshSession(); } catch { /* ignore */ }
+        void connect();
+      }, delay);
     };
+    socket.onerror = () => { try { socket?.close(); } catch { /* ignore */ } };
+
     socket.onerror = () => socket?.close();
   };
 
@@ -225,11 +272,55 @@ export async function startBmoniNigeria(bvn: string, ngnWalletIndex = 0) {
 }
 export async function getBmoniOnboardingStatus() { return apiFetch<{ data: any }>('/institution/billing/bmoni/status'); }
 export async function getBmoniDepositAccount() { return apiFetch<{ data: any }>('/institution/billing/bmoni/deposit-account'); }
+/** Stable idempotency key per institution payment attempt window (24h). Retries reuse the same key. */
+function institutionPaymentIdempotencyKey(): string {
+  const storageKey = 'reach_bmoni_payment_idempotency_v1';
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { key?: string; ts?: number };
+      if (parsed.key && parsed.ts && Date.now() - parsed.ts < 24 * 60 * 60 * 1000) return parsed.key;
+    }
+  } catch { /* ignore */ }
+  const key = crypto.randomUUID();
+  try { localStorage.setItem(storageKey, JSON.stringify({ key, ts: Date.now() })); } catch { /* ignore */ }
+  return key;
+}
+
+export function clearInstitutionPaymentIdempotencyKey() {
+  try { localStorage.removeItem('reach_bmoni_payment_idempotency_v1'); } catch { /* ignore */ }
+}
+
 export async function prepareBmoniInstitutionPayment(amount?: string) {
-  return apiFetch<{ data: any }>('/institution/billing/bmoni/payment/proposal', { method: 'POST', headers: { 'x-idempotency-key': crypto.randomUUID() }, body: JSON.stringify(amount ? { amount } : {}) });
+  return apiFetch<{ data: any }>('/institution/billing/bmoni/payment/proposal', {
+    method: 'POST',
+    headers: { 'x-idempotency-key': institutionPaymentIdempotencyKey() },
+    body: JSON.stringify(amount ? { amount } : {}),
+  });
 }
 export async function submitBmoniInstitutionPaymentSignature(proposalId: string, signature: string) {
-  return apiFetch<{ data: any }>('/institution/billing/bmoni/payment/sign', { method: 'POST', body: JSON.stringify({ proposal_id: proposalId, signature }) });
+  const result = await apiFetch<{ data: any }>('/institution/billing/bmoni/payment/sign', { method: 'POST', body: JSON.stringify({ proposal_id: proposalId, signature }) });
+  clearInstitutionPaymentIdempotencyKey();
+  return result;
 }
 
 export async function updateBmoniKyc(payload: { personalInfo: Record<string, unknown>; addressDetails: Record<string, unknown>; occupationCode?: string }) { return apiFetch<{ data: any }>('/institution/billing/bmoni/kyc', { method: 'PATCH', body: JSON.stringify(payload) }); }
+
+
+export async function createOperatorInvitation(email: string) {
+  return apiFetch<{ data: { id: string; email: string; token: string; expires_at: string } }>('/operator/invitations', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function acceptOperatorInvitation(token: string) {
+  return apiFetch<{ data: any }>('/operator/invitations/accept', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function listOperatorInvitations() {
+  return apiFetch<{ data: any[] }>('/operator/invitations');
+}

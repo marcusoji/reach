@@ -1,41 +1,31 @@
 package com.reach.relay
 
-import java.io.ByteArrayOutputStream
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-
-/** Reassembles MTU-sized BLE fragments with bounds and timeout protection. */
+/** Reassembles BLE fragments: [seq:1][total:1][payload...] */
 class BleTransfer {
-    private data class Buffer(val total:Int, val parts:MutableMap<Int,ByteArray>, val created:Long)
-    private val buffers = ConcurrentHashMap<String, Buffer>()
-    private val cleaner = Executors.newSingleThreadScheduledExecutor()
+    private val parts = HashMap<Int, ByteArray>()
+    private var total = -1
+    private var lastActive = System.currentTimeMillis()
 
-    init { cleaner.scheduleAtFixedRate({ cleanup() }, 10, 10, TimeUnit.SECONDS) }
-
-    fun accept(frame: ByteArray): ByteArray? {
-        require(frame.size >= 20) { "Malformed relay frame" }
-        val transferId = frame.copyOfRange(0, 16).toHex()
-        val seq = ((frame[16].toInt() and 0xff) shl 8) or (frame[17].toInt() and 0xff)
-        val total = ((frame[18].toInt() and 0xff) shl 8) or (frame[19].toInt() and 0xff)
-        require(total in 1..64 && seq in 0 until total) { "Invalid BLE fragment" }
-        val data = frame.copyOfRange(20, frame.size)
-        val b = buffers.computeIfAbsent(transferId) { Buffer(total, mutableMapOf(), System.currentTimeMillis()) }
-        synchronized(b) {
-            if (b.total != total) { buffers.remove(transferId); throw IllegalArgumentException("Fragment mismatch") }
-            b.parts.putIfAbsent(seq, data)
-            if (b.parts.size != total) return null
-            val out = ByteArrayOutputStream()
-            for (i in 0 until total) out.write(b.parts[i])
-            buffers.remove(transferId)
-            return out.toByteArray()
+    fun accept(value: ByteArray): ByteArray? {
+        if (value.size < 3) return null
+        val seq = value[0].toInt() and 0xff
+        val t = value[1].toInt() and 0xff
+        if (t <= 0 || t > 512) return null
+        if (total < 0) total = t
+        if (t != total) { reset(); total = t }
+        parts[seq] = value.copyOfRange(2, value.size)
+        lastActive = System.currentTimeMillis()
+        if (parts.size < total) return null
+        val out = ArrayList<Byte>()
+        for (i in 0 until total) {
+            val p = parts[i] ?: run { reset(); return null }
+            out.addAll(p.toList())
         }
+        reset()
+        return out.toByteArray()
     }
 
-    private fun cleanup() {
-        val cutoff = System.currentTimeMillis() - 30_000
-        buffers.entries.removeIf { it.value.created < cutoff }
+    fun reset() {
+        parts.clear(); total = -1
     }
-
-    private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
 }

@@ -6,13 +6,54 @@ import { bmoni, bmoniConfigured } from './bmoni.ts';
 const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
 function corsFor(req: Request) {
   const origin = req.headers.get('Origin') || '';
-  const allowed = allowedOrigins.includes(origin) ? origin : allowedOrigins.length === 1 && allowedOrigins[0] === '*' ? '*' : '';
-  return {
-    'Access-Control-Allow-Origin': allowed,
+  // Production: explicit allow-list only. Wildcard is rejected for credentialed API use.
+  const allowStar = allowedOrigins.length === 1 && allowedOrigins[0] === '*' && (Deno.env.get('REACH_ALLOW_STAR_CORS') === 'true');
+  const allowed = allowedOrigins.includes(origin) ? origin : (allowStar ? '*' : '');
+  const headers: Record<string, string> = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-idempotency-key',
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     'Vary': 'Origin',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Frame-Options': 'DENY',
   };
+  if (allowed) headers['Access-Control-Allow-Origin'] = allowed;
+  return headers;
+}
+
+const MAX_JSON_BODY = 256 * 1024; // 256 KiB general API JSON
+const MAX_DESCRIPTION = 4000;
+const MAX_RELAY_PACKET = 64 * 1024;
+
+function rateLimitFor(path: string, method: string): { limit: number; window: number } {
+  if (path.startsWith('/webhooks/')) return { limit: 120, window: 60 };
+  if (path.includes('/payment') || path.includes('/bmoni')) return { limit: 20, window: 60 };
+  if (path.includes('/relay')) return { limit: 60, window: 60 };
+  if (path === '/incidents' && method === 'POST') return { limit: 15, window: 60 };
+  if (path.includes('/operator')) return { limit: 20, window: 60 };
+  if (path.includes('/ai') || path.includes('/assess')) return { limit: 30, window: 60 };
+  if (method === 'GET') return { limit: 120, window: 60 };
+  return { limit: 40, window: 60 };
+}
+
+async function readJsonLimited(req: Request, maxBytes = MAX_JSON_BODY): Promise<any> {
+  const raw = await req.text();
+  if (raw.length > maxBytes) {
+    const err = new Error('Request body too large');
+    (err as any).status = 413;
+    throw err;
+  }
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch {
+    const err = new Error('Invalid JSON body');
+    (err as any).status = 400;
+    throw err;
+  }
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 const allowedCategories = new Set(['medical', 'fire', 'security', 'accident', 'other']);
@@ -93,18 +134,31 @@ Deno.serve(async (req) => {
       || req.headers.get('x-event-id')
       || fallbackEventId
     ).slice(0, 200);
-    const existing = await service.from('bmoni_webhook_events').select('id,processed_at').eq('event_id', eventId).maybeSingle();
-    if (existing.data?.processed_at) return json({ ok: true, duplicate: true });
+    const existing = await service.from('bmoni_webhook_events').select('id,processed_at,attempt_count').eq('event_id', eventId).maybeSingle();
+    if (existing.data?.processed_at) return json({ ok: true, duplicate: true, processed: true });
+    // Durable inbox first — ACK provider only after signature verified + row persisted
     if (!existing.data) {
-      const inserted = await service.from('bmoni_webhook_events').insert({ event_id: eventId, event_type: eventType, signature_verified: true, payload });
+      const inserted = await service.from('bmoni_webhook_events').insert({
+        event_id: eventId,
+        event_type: eventType,
+        signature_verified: true,
+        payload,
+        attempt_count: 0,
+      });
       if (inserted.error && !String(inserted.error.message || '').toLowerCase().includes('duplicate')) throw inserted.error;
     }
+    // Track attempt; process synchronously but keep processed_at null on failure for provider retry
+    await service.from('bmoni_webhook_events').update({
+      attempt_count: (existing.data?.attempt_count ?? 0) + 1,
+      last_attempt_at: new Date().toISOString(),
+    }).eq('event_id', eventId).is('processed_at', null);
     const proposalId = payload?.proposalId || payload?.proposal?.id || payload?.data?.proposalId || payload?.data?.proposal?.id;
     const providerTransactionId = payload?.transactionId || payload?.transaction?.id || payload?.data?.transactionId || payload?.data?.transaction?.id;
-    const statusRaw = String(payload?.status || payload?.data?.status || '').toLowerCase();
+    const statusRaw = String(payload?.status || payload?.data?.status || payload?.eventType || '').toLowerCase();
     try {
       const result = await service.rpc('process_bmoni_webhook_event', {
         p_event_id: eventId,
+        p_event_type: eventType,
         p_proposal_id: proposalId ? String(proposalId) : null,
         p_provider_transaction_id: providerTransactionId ? String(providerTransactionId) : null,
         p_status: statusRaw,
@@ -113,7 +167,11 @@ Deno.serve(async (req) => {
       if (result.error) throw result.error;
       return json({ ok: true, ...(result.data || {}) });
     } catch (error) {
-      // Keep processed_at null so the provider can safely retry after a transient/local failure.
+      // Inbox retained; provider may retry. processing_error set inside RPC when possible.
+      await service.from('bmoni_webhook_events').update({
+        processing_error: String(error instanceof Error ? error.message : error).slice(0, 1000),
+        next_attempt_at: new Date(Date.now() + 60_000).toISOString(),
+      }).eq('event_id', eventId).is('processed_at', null);
       return json({ error: 'Webhook processing failed; retry is required' }, 500);
     }
   }
@@ -128,7 +186,13 @@ Deno.serve(async (req) => {
     .single();
   if (profileError || !profile) return json({ error: 'Profile not found' }, 403);
 
-  const rateLimit = await supabase.rpc('check_reach_rate_limit', { p_bucket_key: `${user.id}:${req.method}:${path}`, p_limit: req.method === 'GET' ? 120 : 30, p_window_seconds: 60 });
+  const rl = rateLimitFor(path, req.method);
+  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('cf-connecting-ip') || 'unknown';
+  const rateLimit = await supabase.rpc('check_reach_rate_limit', {
+    p_bucket_key: `${user.id}:${clientIp}:${req.method}:${path.split('/').slice(0, 4).join('/')}`,
+    p_limit: rl.limit,
+    p_window_seconds: rl.window,
+  });
   if (rateLimit.error) throw rateLimit.error;
   if (rateLimit.data === false) return json({ error: 'Rate limit exceeded. Please retry shortly.' }, 429);
 
@@ -161,15 +225,77 @@ Deno.serve(async (req) => {
     }
 
 
+    // Bootstrap-only: permanent key allowed solely when zero operators exist (initial install).
     if (path === '/operator/provision' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
+      const service = requireService();
+      const { count } = await service.from('profiles').select('id', { count: 'exact', head: true }).in('role', ['operator', 'super-admin']);
+      if ((count ?? 0) > 0) {
+        return json({ error: 'Operator provisioning key is disabled after the first operator exists. Use a single-use operator invitation.' }, 403);
+      }
       const configuredKey = Deno.env.get('REACH_OPERATOR_PROVISION_KEY');
       if (!configuredKey || typeof body.key !== 'string' || body.key.length < 32 || body.key !== configuredKey) return json({ error: 'Invalid operator provisioning key' }, 403);
       if (profile.role !== 'citizen' || profile.institution_id) return json({ error: 'Only an unassigned account can be provisioned' }, 403);
-      const { data, error } = await requireService().from('profiles').update({ role: 'operator', institution_id: null }).eq('id', user.id).eq('role', 'citizen').is('institution_id', null).select('id,role,institution_id,full_name').single();
+      const { data, error } = await service.from('profiles').update({ role: 'super-admin', institution_id: null }).eq('id', user.id).eq('role', 'citizen').is('institution_id', null).select('id,role,institution_id,full_name').single();
       if (error) throw error;
-      await requireService().from('audit_logs').insert({ actor_id: user.id, action: 'operator.provisioned', resource_type: 'profile', resource_id: user.id, metadata: { source: 'server_provisioning_key' } });
+      await service.from('audit_logs').insert({ actor_id: user.id, action: 'operator.bootstrap', resource_type: 'profile', resource_id: user.id, metadata: { source: 'bootstrap_provisioning_key' } });
       return json({ data });
+    }
+
+    // Super-admin creates single-use operator invitation
+    if (path === '/operator/invitations' && req.method === 'POST') {
+      if (!['super-admin', 'operator'].includes(profile.role)) return json({ error: 'Not permitted' }, 403);
+      // Only super-admin may invite by default; operators restricted unless flagged
+      if (profile.role !== 'super-admin') return json({ error: 'Only super-admin can create operator invitations' }, 403);
+      const body = await readJsonLimited(req);
+      const email = textValue(body.email, 200)?.toLowerCase();
+      if (!email || !email.includes('@')) return json({ error: 'Valid email is required' }, 422);
+      const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+      const tokenHash = await sha256Hex(token);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const service = requireService();
+      const { data, error } = await service.from('operator_invitations').insert({
+        email,
+        token_hash: tokenHash,
+        invited_by: user.id,
+        status: 'pending',
+        expires_at: expiresAt,
+      }).select('id,email,status,expires_at,created_at').single();
+      if (error) throw error;
+      await service.from('audit_logs').insert({ actor_id: user.id, action: 'operator.invitation_created', resource_type: 'operator_invitation', resource_id: data.id, metadata: { email } });
+      // Return raw token once; only hash is stored
+      return json({ data: { ...data, token } }, 201);
+    }
+
+    // Accept operator invitation (single-use, email-bound, expired rejected)
+    if (path === '/operator/invitations/accept' && req.method === 'POST') {
+      const body = await readJsonLimited(req);
+      const token = typeof body.token === 'string' ? body.token.trim() : '';
+      if (token.length < 32) return json({ error: 'Invalid invitation token' }, 422);
+      if (profile.role !== 'citizen' || profile.institution_id) return json({ error: 'Only an unassigned citizen account can accept an operator invitation' }, 403);
+      const tokenHash = await sha256Hex(token);
+      const service = requireService();
+      const { data: inv, error: invErr } = await service.from('operator_invitations').select('*').eq('token_hash', tokenHash).maybeSingle();
+      if (invErr) throw invErr;
+      if (!inv || inv.status !== 'pending') return json({ error: 'Invitation not found or already used' }, 404);
+      if (new Date(inv.expires_at).getTime() < Date.now()) {
+        await service.from('operator_invitations').update({ status: 'expired' }).eq('id', inv.id);
+        return json({ error: 'Invitation has expired' }, 410);
+      }
+      const userEmail = (user.email || '').toLowerCase();
+      if (userEmail !== String(inv.email).toLowerCase()) return json({ error: 'Invitation email does not match signed-in user' }, 403);
+      const { data, error } = await service.from('profiles').update({ role: 'operator', institution_id: null }).eq('id', user.id).eq('role', 'citizen').is('institution_id', null).select('id,role,institution_id,full_name').single();
+      if (error) throw error;
+      await service.from('operator_invitations').update({ status: 'accepted', accepted_at: new Date().toISOString(), accepted_user_id: user.id }).eq('id', inv.id).eq('status', 'pending');
+      await service.from('audit_logs').insert({ actor_id: user.id, action: 'operator.invitation_accepted', resource_type: 'operator_invitation', resource_id: inv.id, metadata: {} });
+      return json({ data });
+    }
+
+    if (path === '/operator/invitations' && req.method === 'GET') {
+      if (profile.role !== 'super-admin') return json({ error: 'Not permitted' }, 403);
+      const { data, error } = await requireService().from('operator_invitations').select('id,email,status,expires_at,accepted_at,created_at,revoked_at').order('created_at', { ascending: false }).limit(100);
+      if (error) throw error;
+      return json({ data: data ?? [] });
     }
 
     if (path === '/institutions' && req.method === 'POST') {
@@ -352,6 +478,23 @@ Deno.serve(async (req) => {
       const expectedSourceSigned = canonical({ ...body, v: body.v ?? 2, k: packetKey, e: Date.parse(String(body.ttl_expires_at)), m: maxHops, incident_id: body.incident_id, source_device_id: sourceDevice, x: packetHash, minimal_payload: body.minimal_payload ?? {} });
       if (expectedSourceSigned !== sourceSignedPayload) return json({ error: 'Source signed payload does not match packet' }, 403);
       if (!(await verifyEcdsa(sourceKey, sourceSignature, sourceSignedPayload))) return json({ error: 'Invalid source packet signature' }, 403);
+      // Gateway dedup: packet_key + packet_hash (multi-path safe: BLE/Wi-Fi/PWA)
+      const svc = requireService();
+      const prior = await svc.from('relay_ingest_dedup').select('receive_count').eq('packet_key', packetKey).eq('packet_hash', packetHash).maybeSingle();
+      if (prior.data) {
+        await svc.from('relay_ingest_dedup').update({
+          receive_count: (prior.data.receive_count || 1) + 1,
+          last_seen_at: new Date().toISOString(),
+        }).eq('packet_key', packetKey).eq('packet_hash', packetHash);
+        // Still continue to ingest path — SQL incident create must remain idempotent by fingerprint
+      } else {
+        await svc.from('relay_ingest_dedup').insert({
+          packet_key: packetKey,
+          packet_hash: packetHash,
+          institution_id: profile.institution_id,
+        });
+      }
+
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sourceSignedPayload));
       const expectedHash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
       if (expectedHash !== packetHash) return json({ error: 'Packet fingerprint mismatch' }, 403);
@@ -718,7 +861,36 @@ Deno.serve(async (req) => {
       return json({ data: checks, checked_at: new Date().toISOString(), overall: checks.some((c) => c.status === 'Unhealthy') ? 'degraded' : 'healthy' });
     }
 
-    if (path === '/notifications' && req.method === 'GET') {
+    
+    // Record delivery attempt idempotently (channel + recipient + notification)
+    if (path === '/notifications/deliveries' && req.method === 'POST') {
+      if (!['operator','super-admin','security-desk','institution'].includes(profile.role)) return json({ error: 'Not permitted' }, 403);
+      const body = await readJsonLimited(req);
+      const notificationId = textValue(body.notification_id, 36);
+      const channel = textValue(body.channel, 40) || 'push';
+      const recipient = textValue(body.recipient, 200);
+      if (!notificationId || !recipient) return json({ error: 'notification_id and recipient are required' }, 422);
+      const service = requireService();
+      const { data: existing } = await service.from('notification_deliveries').select('*').eq('notification_id', notificationId).eq('channel', channel).eq('recipient', recipient).maybeSingle();
+      if (existing) return json({ data: existing, duplicate: true });
+      const { data, error } = await service.from('notification_deliveries').insert({
+        notification_id: notificationId,
+        channel,
+        recipient,
+        status: 'queued',
+        provider_message_id: textValue(body.provider_message_id, 200),
+      }).select().single();
+      if (error) {
+        if (String(error.message||'').toLowerCase().includes('duplicate')) {
+          const again = await service.from('notification_deliveries').select('*').eq('notification_id', notificationId).eq('channel', channel).eq('recipient', recipient).maybeSingle();
+          return json({ data: again.data, duplicate: true });
+        }
+        throw error;
+      }
+      return json({ data }, 201);
+    }
+
+if (path === '/notifications' && req.method === 'GET') {
       const { data, error } = await supabase.from('notifications').select('id,incident_id,channel,title,body,status,created_at,sent_at,read_at').order('created_at', { ascending: false }).limit(50);
       if (error) throw error;
       return json({ data: data ?? [] });

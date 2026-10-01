@@ -1,6 +1,5 @@
 package com.reach.relay
 
-import android.Manifest
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
@@ -11,32 +10,180 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import java.util.UUID
 
-/** Native BLE central: discovers REACH relay nodes and pushes authenticated packets using bounded fragments. */
-class BleCentralRelay(private val context:Context, private val onPeer:(Boolean)->Unit={}) {
-    private val adapter=(context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-    private var scanner:BluetoothLeScanner?=null
-    private var gatt:BluetoothGatt?=null
-    private var characteristic:BluetoothGattCharacteristic?=null
-    private var pending:ByteArray?=null
-    private var seq=0
-    private var total=0
-    private var transfer=ByteArray(16)
-    private var completion:(Boolean)->Unit={}
-    private val service=UUID.fromString(RelayProtocol.SERVICE_UUID)
-    private val data=UUID.fromString(RelayProtocol.DATA_UUID)
+/**
+ * BLE central: fragment write + wait for ACK characteristic notification/read.
+ * Packet is only considered delivered when ACK verifies packet id + hash + accepted.
+ */
+class BleCentralRelay(private val context: Context, private val onPeer: (Boolean) -> Unit = {}) {
+    private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    private var scanner: BluetoothLeScanner? = null
+    private var gatt: BluetoothGatt? = null
+    private var dataChar: BluetoothGattCharacteristic? = null
+    private var ackChar: BluetoothGattCharacteristic? = null
+    private var pending: ByteArray? = null
+    private var packetId: String = ""
+    private var packetHash: String = ""
+    private var seq = 0
+    private var total = 0
+    private var completion: (Boolean, String?) -> Unit = { _, _ -> }
+    private var finished = false
+    private val service = UUID.fromString(RelayProtocol.SERVICE_UUID)
+    private val dataUuid = UUID.fromString(RelayProtocol.DATA_UUID)
+    private val ackUuid = UUID.fromString(RelayProtocol.ACK_UUID)
+    private val handler = Handler(Looper.getMainLooper())
+    private val ackTimeout = Runnable { finish(false, null) }
 
-    fun discoverAndSend(packet:ByteArray, onComplete:(Boolean)->Unit={}){
-        if(!permissions()||adapter==null||!adapter.isEnabled)return
-        pending=packet; completion=onComplete; scanner=adapter.bluetoothLeScanner
-        scanner?.startScan(listOf(ScanFilter.Builder().setServiceUuid(android.os.ParcelUuid(service)).build()),ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),scanCallback); Handler(Looper.getMainLooper()).postDelayed({ scanner?.stopScan(scanCallback); if(pending!=null){pending=null;completion(false);completion={}} },8000)
+    fun discoverAndSend(packet: ByteArray, onComplete: (Boolean) -> Unit = {}) {
+        discoverAndSendWithAck(packet, "", "") { ok, _ -> onComplete(ok) }
     }
-    private val scanCallback=object:ScanCallback(){override fun onScanResult(type:Int,result:ScanResult){scanner?.stopScan(this); gatt=result.device.connectGatt(context,false,gattCallback)}}
-    private val gattCallback=object:BluetoothGattCallback(){
-        override fun onConnectionStateChange(g:BluetoothGatt,status:Int,newState:Int){if(newState==BluetoothProfile.STATE_CONNECTED){g.discoverServices()}else if(newState==BluetoothProfile.STATE_DISCONNECTED){g.close();completion(false);completion={};onPeer(false)}}
-        override fun onServicesDiscovered(g:BluetoothGatt,status:Int){if(status!=BluetoothGatt.GATT_SUCCESS){g.close();return};characteristic=g.getService(service)?.getCharacteristic(data);if(characteristic==null){g.close();return};pending?.let{startFragments(it)}}
-        override fun onCharacteristicWrite(g:BluetoothGatt,ch:BluetoothGattCharacteristic,status:Int){if(status!=BluetoothGatt.GATT_SUCCESS){g.close();return};sendNext(g)}
+
+    fun discoverAndSendWithAck(
+        packet: ByteArray,
+        id: String,
+        hash: String,
+        onComplete: (Boolean, String?) -> Unit
+    ) {
+        if (!permissions() || adapter == null || !adapter.isEnabled) {
+            onComplete(false, null); return
+        }
+        finished = false
+        pending = packet
+        packetId = id
+        packetHash = hash
+        completion = onComplete
+        scanner = adapter.bluetoothLeScanner
+        scanner?.startScan(
+            listOf(ScanFilter.Builder().setServiceUuid(android.os.ParcelUuid(service)).build()),
+            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
+            scanCallback
+        )
+        handler.postDelayed({
+            scanner?.stopScan(scanCallback)
+            if (!finished && pending != null) finish(false, null)
+        }, 8_000)
     }
-    private fun startFragments(bytes:ByteArray){transfer=java.security.SecureRandom().generateSeed(16);total=Math.ceil(bytes.size/RelayProtocol.CHUNK_BYTES.toDouble()).toInt();seq=0;sendNext(gatt!!)}
-    private fun sendNext(g:BluetoothGatt){val bytes=pending?:return;if(seq>=total){pending=null;g.close();completion(true);completion={};onPeer(true);return};val start=seq*RelayProtocol.CHUNK_BYTES;val body=bytes.copyOfRange(start,minOf(bytes.size,start+RelayProtocol.CHUNK_BYTES));val frame=ByteArray(20+body.size);System.arraycopy(transfer,0,frame,0,16);frame[16]=(seq ushr 8).toByte();frame[17]=seq.toByte();frame[18]=(total ushr 8).toByte();frame[19]=total.toByte();System.arraycopy(body,0,frame,20,body.size);characteristic!!.writeType=BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;characteristic!!.value=frame;if(!g.writeCharacteristic(characteristic!!)){g.close();completion(false);completion={};return};seq++}
-    private fun permissions():Boolean=if(Build.VERSION.SDK_INT>=31) listOf(Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT).all{ContextCompat.checkSelfPermission(context,it)==PackageManager.PERMISSION_GRANTED}else true
+
+    private fun finish(ok: Boolean, peer: String?) {
+        if (finished) return
+        finished = true
+        handler.removeCallbacks(ackTimeout)
+        try { scanner?.stopScan(scanCallback) } catch (_: Exception) {}
+        try { gatt?.close() } catch (_: Exception) {}
+        gatt = null
+        pending = null
+        val cb = completion
+        completion = { _, _ -> }
+        cb(ok, peer)
+        onPeer(ok)
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(type: Int, result: ScanResult) {
+            scanner?.stopScan(this)
+            gatt = result.device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        }
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                // Prefer encrypted link when bonding is available
+                try {
+                    if (Build.VERSION.SDK_INT >= 19) {
+                        g.device.createBond()
+                    }
+                } catch (_: Exception) {}
+                g.discoverServices()
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                finish(false, null)
+            }
+        }
+
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                finish(false, null); return
+            }
+            val svc = g.getService(service) ?: run { finish(false, null); return }
+            dataChar = svc.getCharacteristic(dataUuid)
+            ackChar = svc.getCharacteristic(ackUuid)
+            if (dataChar == null) {
+                finish(false, null); return
+            }
+            // Subscribe to ACK notifications when available
+            ackChar?.let { ch ->
+                g.setCharacteristicNotification(ch, true)
+                ch.descriptors?.firstOrNull()?.let { d ->
+                    d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    g.writeDescriptor(d)
+                }
+            }
+            pending?.let { startFragments(g, it) }
+        }
+
+        override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                finish(false, g.device?.address); return
+            }
+            if (seq < total) writeNext(g)
+            else {
+                // All fragments written — wait for ACK, do NOT treat as success yet
+                handler.postDelayed(ackTimeout, RelayProtocol.ACK_TIMEOUT_MS)
+                // Also try explicit ACK read if notifications unsupported
+                ackChar?.let { g.readCharacteristic(it) }
+            }
+        }
+
+        override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            if (characteristic.uuid == ackUuid) handleAck(characteristic.value, g.device?.address)
+        }
+
+        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == ackUuid) {
+                handleAck(characteristic.value, g.device?.address)
+            }
+        }
+    }
+
+    private fun handleAck(raw: ByteArray?, peer: String?) {
+        if (raw == null) return
+        try {
+            val ack = RelayProtocol.parseAck(raw)
+            val ok = if (packetId.isNotBlank() && packetHash.isNotBlank()) {
+                RelayProtocol.verifyAck(ack, packetId, packetHash)
+            } else {
+                ack.optBoolean("accepted", false)
+            }
+            finish(ok, peer ?: ack.optString("receiver_device_id"))
+        } catch (_: Exception) {
+            // mismatched/invalid ACK ignored; timeout will fail
+        }
+    }
+
+    private fun startFragments(g: BluetoothGatt, packet: ByteArray) {
+        total = (packet.size + RelayProtocol.FRAGMENT - 1) / RelayProtocol.FRAGMENT
+        seq = 0
+        writeNext(g)
+    }
+
+    private fun writeNext(g: BluetoothGatt) {
+        val packet = pending ?: return
+        val start = seq * RelayProtocol.FRAGMENT
+        val end = minOf(packet.size, start + RelayProtocol.FRAGMENT)
+        val chunk = packet.copyOfRange(start, end)
+        val header = byteArrayOf(seq.toByte(), total.toByte())
+        val frame = header + chunk
+        dataChar?.value = frame
+        dataChar?.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        seq++
+        g.writeCharacteristic(dataChar)
+    }
+
+    private fun permissions(): Boolean {
+        val need = mutableListOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 31) {
+            need += android.Manifest.permission.BLUETOOTH_SCAN
+            need += android.Manifest.permission.BLUETOOTH_CONNECT
+        }
+        return need.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    }
 }

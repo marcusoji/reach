@@ -1,54 +1,123 @@
 package com.reach.relay
 
+import android.util.Base64
 import org.json.JSONObject
 import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
-import android.util.Base64
 
 object RelayProtocol {
-    const val SERVICE_UUID = "5f7a0001-8b3a-4e54-9f1e-726561636831"
-    const val CONTROL_UUID = "5f7a0002-8b3a-4e54-9f1e-726561636832"
-    const val DATA_UUID = "5f7a0003-8b3a-4e54-9f1e-726561636833"
-    const val ACK_UUID = "5f7a0004-8b3a-4e54-9f1e-726561636834"
+    const val SERVICE_UUID = "6b4f1c20-9f4a-4f6e-9c2d-1a2b3c4d5e6f"
+    const val DATA_UUID = "6b4f1c21-9f4a-4f6e-9c2d-1a2b3c4d5e6f"
+    const val ACK_UUID = "6b4f1c22-9f4a-4f6e-9c2d-1a2b3c4d5e6f"
+    const val PROTOCOL_VERSION = 2
     const val MAX_HOPS = 6
-    const val MAX_BYTES = 4096
-    const val CHUNK_BYTES = 180
-    const val TTL_MS = 30 * 60 * 1000L
+    const val TTL_MS = 30 * 60 * 1000L // 30 minutes — must match server
+    const val MAX_PACKET_BYTES = 48 * 1024
+    const val ACK_TIMEOUT_MS = 12_000L
+    const val FRAGMENT = 160
 
     fun validate(raw: ByteArray): JSONObject {
-        require(raw.size in 1..MAX_BYTES) { "Invalid packet size" }
-        val o=JSONObject(String(raw,Charsets.UTF_8))
-        require(o.optInt("v") == 2) { "Unsupported packet version" }
+        require(raw.size in 32..MAX_PACKET_BYTES) { "Invalid packet size" }
+        val o = JSONObject(String(raw, Charsets.UTF_8))
+        require(o.optInt("v") == PROTOCOL_VERSION) { "Unsupported packet version" }
         require(o.optString("k").length in 8..160) { "Missing packet key" }
-        require(o.optString("x").length in 64..64) { "Missing packet hash" }
-        require(System.currentTimeMillis() <= o.optLong("e")) { "Packet expired" }
-        val max=o.optInt("m",MAX_HOPS); val hops=o.optInt("h",0)
-        require(max in 1..MAX_HOPS && hops in 0 until max) { "Hop limit reached" }
-        verify(o,o.optString("source_public_key"),o.optString("source_signature"),o.optString("source_signed_payload"))
-        if(o.optString("relay_device_id").isNotBlank()) verify(o,o.optString("relay_public_key"),o.optString("relay_signature"),o.optString("relay_signed_payload"),relay=true)
-        val expected=sha256(DeviceIdentity.canonicalSource(o))
+        require(o.optString("x").length == 64) { "Missing packet hash" }
+        val now = System.currentTimeMillis()
+        val expires = o.optLong("e")
+        require(expires > 0 && now <= expires) { "Packet expired" }
+        // Cap TTL: reject packets that claim more than MAX TTL from now-ish creation window
+        val maxExpiry = now + TTL_MS + 60_000L
+        require(expires <= maxExpiry) { "TTL exceeds maximum" }
+        val max = o.optInt("m", MAX_HOPS)
+        val hops = o.optInt("h", 0)
+        // Never trust client max above server constant
+        require(max in 1..MAX_HOPS) { "Invalid max hops" }
+        require(hops in 0 until max) { "Hop limit reached" }
+        verify(o, o.optString("source_public_key"), o.optString("source_signature"), o.optString("source_signed_payload"))
+        if (o.optString("relay_device_id").isNotBlank()) {
+            verify(o, o.optString("relay_public_key"), o.optString("relay_signature"), o.optString("relay_signed_payload"), relay = true)
+        }
+        val expected = sha256(DeviceIdentity.canonicalSource(o))
         require(expected == o.optString("x")) { "Packet fingerprint mismatch" }
         return o
     }
 
-    private fun verify(o:JSONObject,keyB64:String,sigB64:String,signed:String,relay:Boolean=false){
+    private fun verify(o: JSONObject, keyB64: String, sigB64: String, signed: String, relay: Boolean = false) {
         require(keyB64.isNotBlank() && sigB64.isNotBlank() && signed.isNotBlank()) { "Missing packet signature" }
-        val key=KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.decode(keyB64,Base64.DEFAULT)))
-        val s=Signature.getInstance("SHA256withECDSA"); s.initVerify(key); s.update(signed.toByteArray(Charsets.UTF_8))
-        require(s.verify(Base64.decode(sigB64,Base64.DEFAULT))) { if(relay) "Invalid relay signature" else "Invalid source signature" }
+        val key = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.decode(keyB64, Base64.DEFAULT)))
+        val s = Signature.getInstance("SHA256withECDSA")
+        s.initVerify(key)
+        s.update(signed.toByteArray(Charsets.UTF_8))
+        require(s.verify(Base64.decode(sigB64, Base64.DEFAULT))) {
+            if (relay) "Invalid relay signature" else "Invalid source signature"
+        }
     }
 
-    fun newPacket(payload:JSONObject):JSONObject{
-        val p=JSONObject(payload.toString()); val now=System.currentTimeMillis()
-        p.put("v",2); p.put("k",p.optString("k").ifBlank{java.util.UUID.randomUUID().toString()}); p.put("e",now+TTL_MS); p.put("h",0); p.put("m",MAX_HOPS); p.put("source_device_id",DeviceIdentity.deviceId()); p.put("source_public_key",DeviceIdentity.publicKeyB64())
-        p.put("x",sha256(DeviceIdentity.canonicalSource(p))); return DeviceIdentity.signSourcePacket(p)
+    fun newPacket(payload: JSONObject): JSONObject {
+        val p = JSONObject(payload.toString())
+        val now = System.currentTimeMillis()
+        p.put("v", PROTOCOL_VERSION)
+        p.put("k", p.optString("k").ifBlank { java.util.UUID.randomUUID().toString() })
+        p.put("e", now + TTL_MS)
+        p.put("h", 0)
+        p.put("m", MAX_HOPS) // immutable server/client max
+        p.put("source_device_id", DeviceIdentity.deviceId())
+        p.put("source_public_key", DeviceIdentity.publicKeyB64())
+        p.put("x", sha256(DeviceIdentity.canonicalSource(p)))
+        return DeviceIdentity.signSourcePacket(p)
     }
 
-    fun nextHop(o:JSONObject):JSONObject{
-        val p=JSONObject(o.toString()); p.put("h",p.optInt("h")+1); p.remove("relay_signature"); p.remove("relay_signed_payload"); p.remove("relay_device_id"); p.remove("relay_public_key"); return DeviceIdentity.signRelayPacket(p)
+    fun nextHop(o: JSONObject): JSONObject {
+        val p = JSONObject(o.toString())
+        val hops = p.optInt("h") + 1
+        require(hops < p.optInt("m", MAX_HOPS).coerceAtMost(MAX_HOPS)) { "Hop limit" }
+        p.put("h", hops)
+        p.remove("relay_signature")
+        p.remove("relay_signed_payload")
+        p.remove("relay_device_id")
+        p.remove("relay_public_key")
+        return DeviceIdentity.signRelayPacket(p)
     }
 
-    private fun sha256(s:String):String=MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString(""){"%02x".format(it)}
+    /** ACK after receiver validates + persists. */
+    fun buildAck(
+        packetId: String,
+        packetHash: String,
+        accepted: Boolean,
+        reason: String = ""
+    ): ByteArray {
+        val ack = JSONObject()
+            .put("type", "ACK")
+            .put("v", PROTOCOL_VERSION)
+            .put("k", packetId)
+            .put("x", packetHash)
+            .put("accepted", accepted)
+            .put("reason", reason)
+            .put("receiver_device_id", DeviceIdentity.deviceId())
+            .put("ts", System.currentTimeMillis())
+        return ack.toString().toByteArray(Charsets.UTF_8)
+    }
+
+    fun parseAck(raw: ByteArray): JSONObject {
+        require(raw.size in 16..4096) { "Invalid ACK size" }
+        val o = JSONObject(String(raw, Charsets.UTF_8))
+        require(o.optString("type") == "ACK") { "Not an ACK" }
+        require(o.optInt("v") == PROTOCOL_VERSION) { "ACK version mismatch" }
+        require(o.optString("k").isNotBlank()) { "ACK missing packet id" }
+        require(o.optString("x").length == 64) { "ACK missing hash" }
+        require(o.optString("receiver_device_id").isNotBlank()) { "ACK missing receiver" }
+        return o
+    }
+
+    fun verifyAck(ack: JSONObject, expectedId: String, expectedHash: String): Boolean {
+        if (ack.optString("k") != expectedId) return false
+        if (ack.optString("x") != expectedHash) return false
+        if (!ack.optBoolean("accepted", false)) return false
+        return true
+    }
+
+    private fun sha256(s: String): String =
+        MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 }
