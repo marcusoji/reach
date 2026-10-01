@@ -44,6 +44,13 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   regress migrations `0002` (`revoke all on public.func` → must be `on function`) and `0004` (unbraced `text[]`).
   When merging a package, always keep the repo's `supabase/migrations/0002`,`0004`, `scripts/tests/migrations.mjs`,
   `scripts/tests/supabase-bootstrap.sql` and the `validate:migrations` script, then re-run `validate:migrations`.
-- `relay-node-android/` ships `gradlew` + `gradle/wrapper/gradle-wrapper.properties` but **no `gradle-wrapper.jar`**,
-  so `./gradlew` will not run until the jar is generated (`gradle wrapper`) or committed. CI's android job is
-  guarded on that jar and skips meanwhile.
+- `relay-node-android/` build works from a clean checkout: the Gradle wrapper jar is committed, and
+  `./gradlew assembleDebug lint` passes on JDK 17 with `ANDROID_HOME` set (`local.properties` is git-ignored).
+  CI's android job gates on `gradle/wrapper/gradle-wrapper.jar` being present.
+- The Kotlin DSL files use double-quoted Kotlin string literals — `settings.gradle.kts`/`build.gradle.kts`
+  originally shipped Groovy single quotes (`rootProject.name='x'`), which never compiled.
+- `gradle.properties` must set `android.useAndroidX=true` (AndroidX deps) and the Java/Kotlin JVM target
+  must match (`compileOptions` + `kotlinOptions.jvmTarget = "17"`), or AGP fails configuration.
+- Privileged Bluetooth/Wi-Fi Direct calls are gated by `Permissions.kt`; the transports carry
+  `@SuppressLint("MissingPermission")` because lint cannot follow the `permissions()` helper. Do not
+  remove those gates — `RelayService.startRelay()` and `WifiDirectRelay.sendWithAck()` fail closed.

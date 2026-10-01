@@ -1,5 +1,6 @@
 package com.reach.relay
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -22,6 +23,7 @@ import kotlin.concurrent.thread
  * Frame: [4-byte length][payload]
  * After send, wait for ACK frame; only then report success.
  */
+@SuppressLint("MissingPermission") // sendWithAck() gates on Permissions.wifiDirect() and fails closed
 class WifiDirectRelay(private val context: Context) {
     private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
     private val channel = manager?.initialize(context, context.mainLooper, null)
@@ -40,6 +42,9 @@ class WifiDirectRelay(private val context: Context) {
         onComplete: (Boolean, String?) -> Unit
     ) {
         if (manager == null || channel == null) {
+            onComplete(false, null); return
+        }
+        if (!Permissions.wifiDirect(context)) {
             onComplete(false, null); return
         }
         if (packet.size > RelayProtocol.MAX_PACKET_BYTES) {

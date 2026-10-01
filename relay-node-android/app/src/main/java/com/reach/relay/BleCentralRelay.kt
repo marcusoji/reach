@@ -1,19 +1,19 @@
 package com.reach.relay
 
+import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import androidx.core.content.ContextCompat
 import java.util.UUID
 
 /**
  * BLE central: fragment write + wait for ACK characteristic notification/read.
  * Packet is only considered delivered when ACK verifies packet id + hash + accepted.
  */
+@SuppressLint("MissingPermission") // every privileged call is gated by permissions() below
 class BleCentralRelay(private val context: Context, private val onPeer: (Boolean) -> Unit = {}) {
     private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private var scanner: BluetoothLeScanner? = null
@@ -178,12 +178,5 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
         g.writeCharacteristic(dataChar)
     }
 
-    private fun permissions(): Boolean {
-        val need = mutableListOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 31) {
-            need += android.Manifest.permission.BLUETOOTH_SCAN
-            need += android.Manifest.permission.BLUETOOTH_CONNECT
-        }
-        return need.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
-    }
+    private fun permissions(): Boolean = Permissions.bleScan(context) && Permissions.bleConnect(context)
 }

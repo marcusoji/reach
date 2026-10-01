@@ -1,5 +1,6 @@
 package com.reach.relay
 
+import android.annotation.SuppressLint
 import android.app.*
 import android.bluetooth.*
 import android.bluetooth.le.AdvertiseCallback
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Peripheral: advertise REACH relay service, accept BLE fragments, validate, persist, ACK.
  * Also runs Wi-Fi ACK server and periodic queue drain/cleanup.
  */
+@SuppressLint("MissingPermission") // startRelay() gates on the BLUETOOTH_* permissions and returns early
 class RelayService : Service() {
     private val serviceUuid = UUID.fromString(RelayProtocol.SERVICE_UUID)
     private val writeUuid = UUID.fromString(RelayProtocol.DATA_UUID)
@@ -77,6 +79,9 @@ class RelayService : Service() {
     }
 
     private fun startRelay() {
+        // Peripheral needs connect (GATT server) + advertise; fail closed rather than
+        // letting the platform throw SecurityException on a revoked permission.
+        if (!Permissions.bleConnect(this) || !Permissions.bleAdvertise(this)) return
         val manager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = manager.adapter ?: return
         if (!adapter.isEnabled) return
