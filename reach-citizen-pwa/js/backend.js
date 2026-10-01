@@ -1,5 +1,5 @@
 import { appState } from './state.js';
-import { buildRelayPacket, getRelayIdentity } from './relay/protocol.js';
+import { buildRelayPacket, getRelayIdentity, toServerPacket } from './relay/protocol.js';
 import { detectRelayCapabilities } from './relay/capabilities.js';
 
 const cfg = window.REACH_CONFIG || {};
@@ -9,6 +9,7 @@ const API_URL = (cfg.API_URL || `${SUPABASE_URL}/functions/v1/api`).replace(/\/$
 const SESSION_KEY = 'reach_pwa_session';
 const DB_NAME = 'reach-offline';
 const STORE = 'incident-queue';
+const RELAY_STORE = 'relay-queue';
 const QUEUE_STATE_QUEUED = 'queued';
 const QUEUE_STATE_RETRYING = 'retrying';
 const QUEUE_STATE_DEAD = 'dead_letter';
@@ -68,6 +69,23 @@ async function api(path, options={}, retry=true) {
 }
 
 export async function createIncident(payload,idempotencyKey){const result=await api('/incidents',{method:'POST',headers:{'x-idempotency-key':idempotencyKey},body:JSON.stringify(payload)});return result.data;}
+
+/** Upload a signed relay packet to the gateway (connected path, no radio hop). */
+export async function sendRelayPacket(packet){const result=await api('/relay/packets',{method:'POST',body:JSON.stringify(toServerPacket(packet,'pwa'))});return result.data;}
+
+/** Flush signed relay packets queued while offline. Each item holds {id,packet}. */
+export async function flushRelayQueue(){
+  const db=await openDb();
+  let items=[];
+  try{ items=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}); }catch{ return {sent:0,remaining:0}; }
+  let sent=0;
+  for(const item of items){
+    try{ await sendRelayPacket(item.packet); await new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).delete(item.id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);}); sent++; }
+    catch{ /* keep for the next flush */ }
+  }
+  return {sent,remaining:items.length-sent};
+}
+function queueRelayPacket(packet){return openDb().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).put({id:packet.k,packet,createdAt:Date.now()});tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);}));}
 export async function getIncident(id){return (await api(`/incidents/${encodeURIComponent(id)}`)).data;}
 export async function updateProfile(patch){return (await api('/me',{method:'PATCH',body:JSON.stringify(patch)})).data;}
 export async function queueIncident(payload,idempotencyKey){const db=await openDb();const now=Date.now();await purgeExpired(db,now);const items=await allQueuedFromDb(db);if(items.length>=QUEUE_MAX_ITEMS){throw new Error('Offline emergency queue is full; reconnect to send pending emergencies before creating another queued report.');}await put(db,{id:idempotencyKey,payload,idempotencyKey,createdAt:now,attempts:0,nextAttemptAt:now});}
@@ -114,7 +132,7 @@ export async function flushQueue(){
   }
   return {sent,remaining:await queueCount(),dead};
 }
-function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains('sync-meta'))db.createObjectStore('sync-meta',{keyPath:'key'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,3);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains('sync-meta'))db.createObjectStore('sync-meta',{keyPath:'key'});if(!db.objectStoreNames.contains(RELAY_STORE))db.createObjectStore(RELAY_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
 function put(db,value){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 function allQueued(){return openDb().then(async db=>{await purgeExpired(db,Date.now());return allQueuedFromDb(db);});}
 function allQueuedFromDb(db){return new Promise((resolve,reject)=>{const req=db.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);});}
@@ -136,11 +154,22 @@ async function tryNativeRelay(payload,key){
   return {status:'relay-queued',packet:built.packet};
 }
 
+/** Build a signed packet and queue it for the gateway. Returns null when relay is disabled. */
+async function queueSignedRelayPacket(payload,key){
+  if(!appState.relayEnabled) return null;
+  const built=await buildRelayPacket({packetKey:key,incidentId:null,category:payload.category,priority:payload.priority,title:payload.title,description:payload.description,locationLabel:payload.location_label,locationSource:payload.location_source,locationAccuracyM:payload.location_accuracy_m,latitude:payload.latitude,longitude:payload.longitude});
+  await queueRelayPacket(built.packet);
+  localStorage.setItem('reach_relay_packet_key',key);
+  return built.packet;
+}
+
 export async function sendOrQueueEmergency(){
   const payload=buildIncidentPayload(); const key=`pwa-${crypto.randomUUID()}`;
   try{
     if(!navigator.onLine){
       try{const relayed=await tryNativeRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Native relay';localStorage.setItem('reach_relay_packet_key',key);return relayed;}}catch{}
+      // No native bridge: queue a signed packet so the gateway can upload it on reconnect.
+      try{const queued=await queueSignedRelayPacket(payload,key); if(queued){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Relay gateway (queued)';return {status:'relay-queued',packet:queued};}}catch{}
       throw new Error('OFFLINE');
     }
     const incident=await createIncident(payload,key);appState.emergency.incidentId=incident.id;appState.emergency.incidentCode=incident.code||incident.id;appState.emergency.deliveryMethod='Connected gateway';return{status:'sent',incident};
@@ -155,7 +184,7 @@ export async function getContacts(){return (await api('/contacts')).data;}
 export async function addContact(contact){return (await api('/contacts',{method:'POST',body:JSON.stringify(contact)})).data;}
 export async function deleteContact(id){await api(`/contacts/${encodeURIComponent(id)}`,{method:'DELETE'});}
 export async function getRelayCapabilities(){ return detectRelayCapabilities(); }
-export function initBackendSync(){window.addEventListener('online',()=>{void flushQueue();});window.setInterval(()=>{if(navigator.onLine)void flushQueue();},30000);void flushQueue();}
+export function initBackendSync(){const flush=()=>{void flushQueue();void flushRelayQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
 
 
 /** Mark offline queue item dead after max attempts — never silent discard. */
