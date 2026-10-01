@@ -66,3 +66,12 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `ingest_relay_packet_service` reads those exact names, and camelCase silently drops location data.
 - `reach-citizen-pwa/js/relay/test-protocol.mjs` needs an `indexedDB` shim to run under Node; it is wired
   into the `pwa` CI job, so it now actually executes (it previously only ever crashed).
+- In `ai_engine.ts`, evidence flagged `contradiction:true` must feed ONLY the contradiction penalty -
+  never `support`, the category scores, or source diversity. It previously did, so confidence *rose* with
+  the number of contradicting sensors (48 -> 53 -> 57 -> 60 at three sensors) and returned
+  `decision:'recommend'`, violating the module's own "abstains when contradictory" contract.
+- `scripts/tests/ai-engine.mjs` verifies the engine and is in CI via `npm run test:ai`. CI's platform job
+  runs Node 20, which cannot `import` a `.ts` file (type stripping landed in 22.6), so the test transpiles
+  with the repo's `typescript` dependency instead of relying on the runtime version.
+- The AI fusion logic lives only in `ai_engine.ts`; the SQL migrations just store assessments
+  (`store_ai_assessment_for_incident`) and do not reimplement scoring.
