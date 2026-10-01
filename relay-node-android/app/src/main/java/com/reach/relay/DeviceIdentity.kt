@@ -29,8 +29,11 @@ object DeviceIdentity {
         return Base64.encodeToString(s.sign(),Base64.NO_WRAP)
     }
 
+    // The signed payload omits x: x is defined as sha256 of this string, so including x
+    // would make the hash self-referential. The fingerprint still binds every other field,
+    // and the ECDSA signature over this string binds x.
     fun canonicalSource(packet:org.json.JSONObject):String = listOf(
-        "v","k","e","m","incident_id","source_device_id","x","minimal_payload"
+        "v","k","e","m","incident_id","source_device_id","minimal_payload"
     ).joinToString("&") { key -> "$key=${packet.opt(key)}" }
 
     fun canonicalRelay(packet:org.json.JSONObject):String = listOf(

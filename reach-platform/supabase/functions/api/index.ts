@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0';
 import { assessEvidence } from './ai_engine.ts';
 import { modelAssist } from './ai_provider.ts';
 import { bmoni, bmoniConfigured } from './bmoni.ts';
+import { canonicalSourceSigned, canonicalRelaySigned, relayFingerprint } from './relay_protocol.ts';
 
 const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
 function corsFor(req: Request) {
@@ -463,21 +464,25 @@ Deno.serve(async (req) => {
         const sLen = der[i++]; const ss = der.slice(i, i + sLen);
         const out = new Uint8Array(64); out.set(r.slice(Math.max(0, r.length - 32)), 32 - Math.min(32, r.length)); out.set(ss.slice(Math.max(0, ss.length - 32)), 64 - Math.min(32, ss.length)); return out;
       };
-      const canonical = (p: Record<string, unknown>, relay = false) => {
-        const keys = relay ? ['v','k','e','h','m','incident_id','source_device_id','x','relay_device_id','minimal_payload'] : ['v','k','e','m','incident_id','source_device_id','x','minimal_payload'];
-        const value = (v: unknown) => v && typeof v === 'object' ? JSON.stringify(v) : String(v);
-        return keys.map(k => `${k}=${value(p[k])}`).join('&');
-      };
+      const canonical = (p: Record<string, unknown>, relay = false) => relay ? canonicalRelaySigned(p) : canonicalSourceSigned(p);
       const verifyEcdsa = async (publicKeyB64: string, signatureB64: string, message: string) => {
-        const keyBytes = Uint8Array.from(atob(publicKeyB64), c => c.charCodeAt(0));
-        const der = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
-        const sigBytes = derToP1363(der);
-        const key = await crypto.subtle.importKey('spki', keyBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-        return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sigBytes, new TextEncoder().encode(message));
+        try {
+          const keyBytes = Uint8Array.from(atob(publicKeyB64), c => c.charCodeAt(0));
+          const der = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
+          const sigBytes = derToP1363(der);
+          const key = await crypto.subtle.importKey('spki', keyBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+          return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sigBytes, new TextEncoder().encode(message));
+        } catch {
+          // Malformed key/signature bytes are a verification failure, not a server error.
+          return false;
+        }
       };
-      const expectedSourceSigned = canonical({ ...body, v: body.v ?? 2, k: packetKey, e: Date.parse(String(body.ttl_expires_at)), m: maxHops, incident_id: body.incident_id, source_device_id: sourceDevice, x: packetHash, minimal_payload: body.minimal_payload ?? {} });
-      if (expectedSourceSigned !== sourceSignedPayload) return json({ error: 'Source signed payload does not match packet' }, 403);
+      const sourceFields = { v: body.v ?? 2, k: packetKey, e: Date.parse(String(body.ttl_expires_at)), m: maxHops, incident_id: body.incident_id, source_device_id: sourceDevice, minimal_payload: body.minimal_payload ?? {} };
+      // The signed payload omits x (see relay_protocol.ts): x is sha256 of that payload,
+      // so embedding x in it would require a hash to contain its own digest.
+      if (canonical(sourceFields) !== sourceSignedPayload) return json({ error: 'Source signed payload does not match packet' }, 403);
       if (!(await verifyEcdsa(sourceKey, sourceSignature, sourceSignedPayload))) return json({ error: 'Invalid source packet signature' }, 403);
+      if ((await relayFingerprint(sourceSignedPayload)) !== packetHash) return json({ error: 'Packet fingerprint mismatch' }, 403);
       // Gateway dedup: packet_key + packet_hash (multi-path safe: BLE/Wi-Fi/PWA)
       const svc = requireService();
       const prior = await svc.from('relay_ingest_dedup').select('receive_count').eq('packet_key', packetKey).eq('packet_hash', packetHash).maybeSingle();
@@ -495,9 +500,6 @@ Deno.serve(async (req) => {
         });
       }
 
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sourceSignedPayload));
-      const expectedHash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-      if (expectedHash !== packetHash) return json({ error: 'Packet fingerprint mismatch' }, 403);
       if (relayDevice) {
         const expectedRelaySigned = canonical({ ...body, v: body.v ?? 2, k: packetKey, e: Date.parse(String(body.ttl_expires_at)), h: hops, m: maxHops, incident_id: body.incident_id, source_device_id: sourceDevice, x: packetHash, relay_device_id: relayDevice, minimal_payload: body.minimal_payload ?? {} }, true);
         if (expectedRelaySigned !== relaySignedPayload) return json({ error: 'Relay signed payload does not match packet' }, 403);

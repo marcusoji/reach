@@ -39,6 +39,8 @@ jobs:
           for f in reach-citizen-pwa/js/*.js reach-citizen-pwa/js/relay/*.js; do
             [ -f "$f" ] && node --check "$f"
           done
+      - name: Relay protocol tests
+        run: node reach-citizen-pwa/js/relay/test-protocol.mjs
 
   sql-migrations:
     runs-on: ubuntu-latest
