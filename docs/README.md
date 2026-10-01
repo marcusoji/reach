@@ -14,6 +14,7 @@
 ## Setup and operations
 | Document | Purpose |
 |----------|---------|
+| [DEPLOYMENT_RUNBOOK.md](./DEPLOYMENT_RUNBOOK.md) | **Start here** — stand up each piece, hosting, BMONI wiring |
 | [SETUP_GUIDE.md](./SETUP_GUIDE.md) | Step-by-step setup (package to staging) |
 | [CI_AND_TESTS.md](./CI_AND_TESTS.md) | CI jobs and test harnesses |
 | [BMONI_DEPLOYMENT.md](./BMONI_DEPLOYMENT.md) | BMONI deploy notes |
