@@ -52,7 +52,6 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    if: hashFiles('relay-node-android/gradle/wrapper/gradle-wrapper.jar') != ''
     defaults:
       run:
         working-directory: relay-node-android
