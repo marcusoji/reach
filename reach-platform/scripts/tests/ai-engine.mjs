@@ -7,11 +7,28 @@
  * so its parsing/validation/retry/timeout logic cannot be exercised without either a
  * live endpoint+credentials or a stub at that boundary.
  */
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import ts from 'typescript';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const API = path.join(HERE, '..', '..', 'supabase', 'functions', 'api');
-const { assessEvidence } = await import(path.join(API, 'ai_engine.ts'));
+
+// The engine is TypeScript. Node only strips .ts types natively from v22.6, and CI runs
+// Node 20, so transpile with the repo's declared `typescript` dependency instead of
+// depending on the runtime version (or on esbuild, which is only a transitive dep).
+const outDir = mkdtempSync(path.join(tmpdir(), 'reach-ai-'));
+const loadTs = async (file) => {
+  const js = ts.transpileModule(readFileSync(path.join(API, file), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText.replace(/\.ts(['"])/g, '.mjs$1');
+  const out = path.join(outDir, file.replace(/\.ts$/, '.mjs'));
+  writeFileSync(out, js);
+  return import(pathToFileURL(out).href);
+};
+const { assessEvidence } = await loadTs('ai_engine.ts');
 
 const NOW = Date.now();
 const at = (msAgo) => new Date(NOW - msAgo).toISOString();
@@ -301,8 +318,7 @@ S('F. Model second-opinion behaviour');
 // ------------------------------------------------------- G: provider adapter
 S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
 {
-  const mod = await import(path.join(API, 'ai_provider.ts'));
-  const { modelAssist } = mod;
+  const { modelAssist } = await loadTs('ai_provider.ts');
   const realFetch = globalThis.fetch;
   const setEnv = (o) => { globalThis.Deno = { env: { get: (k) => o[k] } }; };
   const okResponse = (obj) => ({ ok: true, json: async () => obj });
