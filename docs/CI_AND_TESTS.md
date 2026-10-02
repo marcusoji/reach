@@ -34,4 +34,5 @@
 | `tests/ai_calibration_harness.mjs` | AI evaluation process (needs labelled data) |
 
 ## Android
-`relay-node-android/CI.md` — assembleDebug / test / lint.
+`relay-node-android/CI.md` — `./gradlew assembleDebug lint` (no unit-test task; the
+relay logic is exercised by physical-device matrices, not CI).

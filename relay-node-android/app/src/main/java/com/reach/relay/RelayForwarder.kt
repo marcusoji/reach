@@ -75,7 +75,6 @@ object RelayForwarder {
         }
         val bytes = toSend.toString().toByteArray(Charsets.UTF_8)
         val hash = toSend.optString("x")
-        val attempts = packet.optInt("_attempts_local", 0)
 
         db.markSending(id, "ble", null)
         BleCentralRelay(context).discoverAndSendWithAck(bytes, id, hash) { bleOk, peer ->
@@ -88,8 +87,7 @@ object RelayForwarder {
                     if (wifiOk) {
                         db.success(id)
                     } else {
-                        val nextAttempts = attempts + 1
-                        db.retry(id, nextAttempts, "no_ack", "ble+wifi")
+                        db.retry(id, "no_ack", "ble+wifi")
                     }
                     processNext(context, db, batch, index + 1)
                 }

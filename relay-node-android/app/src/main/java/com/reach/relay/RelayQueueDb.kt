@@ -146,18 +146,27 @@ class RelayQueueDb(context: Context) : SQLiteOpenHelper(context, "reach-relay.db
         writableDatabase.delete("relay_queue", "id=?", arrayOf(id))
     }
 
+    /** Increment the persisted attempt count and reschedule, or dead-letter at the ceiling.
+     *  The count must come from the row, not the caller: the in-memory packet is re-parsed from
+     *  JSON on every drain, so any counter carried there resets to zero each cycle and the packet
+     *  would retry until TTL instead of ever dead-lettering. */
     @Synchronized
-    fun retry(id: String, attempts: Int, error: String?, transport: String?) {
-        if (attempts >= MAX_ATTEMPTS) {
+    fun retry(id: String, error: String?, transport: String?) {
+        var current = 0
+        readableDatabase.rawQuery("SELECT attempts FROM relay_queue WHERE id=?", arrayOf(id)).use { c ->
+            if (c.moveToFirst()) current = c.getInt(0)
+        }
+        val next = current + 1
+        if (next >= MAX_ATTEMPTS) {
             markDead(id, error ?: "max_attempts")
             return
         }
-        val delay = (1000L shl attempts.coerceAtMost(6)).coerceAtMost(120_000L)
+        val delay = (1000L shl next.coerceAtMost(6)).coerceAtMost(120_000L)
         writableDatabase.execSQL(
             "UPDATE relay_queue SET state=?, attempts=?, next_at=?, last_error=?, last_transport=? WHERE id=?",
             arrayOf(
                 STATE_PENDING,
-                attempts,
+                next,
                 System.currentTimeMillis() + delay,
                 error?.take(500),
                 transport,

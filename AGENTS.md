@@ -114,3 +114,14 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - `tests/rls_tenant_isolation.sql` runs inside `npm run validate:migrations` (and therefore CI), so a
   policy regression fails alongside the migration that caused it. The suite grants full DML to
   `authenticated` before asserting, so a failure reflects RLS/policy, not a missing table grant.
+- The Android relay queue (`RelayForwarder`/`RelayQueueDb`) dead-letters after 8 attempts like the PWA.
+  The attempt count must be read from the `relay_queue` row: the packet JSON is re-parsed on every
+  drain, so a counter carried in the packet object resets to 0 each cycle and the packet would retry
+  until TTL. There are no Android unit tests — this is only exercised by physical-device matrices.
+- Several RPCs scope by institution with `if i.institution_id <> public.current_institution_id()`
+  (`transition_assignment`, `transition_incident`, `assign_incident`) rather than `is distinct from`.
+  A caller whose own `institution_id` is NULL — an `operator` with no institution, or a `staff`/
+  `institution` account that somehow lost its institution — makes that comparison NULL, so the guard
+  does not fire and the cross-tenant branch is skipped. Reaching it needs an anomalous account
+  (redeem_staff_invite always sets an institution, and `protect_profile_privileges` blocks
+  self-nulling), so it is a latent gap, not a live hole. Prefer `is distinct from` in new RPCs.
