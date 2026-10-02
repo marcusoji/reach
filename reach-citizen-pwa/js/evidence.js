@@ -30,7 +30,6 @@ const STORE = 'evidence-queue';
 /** Kinds a citizen device may capture. `corroboration` is deliberately absent: it has to mean
  * independent corroboration, not something a client asserts about itself. */
 export const CAPTURE_KINDS = ['image', 'audio', 'video'];
-export const CAPTURE_ACCEPT = 'image/*,audio/*,video/*';
 
 function getSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } }
 export function hasSession() { return Boolean(getSession()?.access_token); }

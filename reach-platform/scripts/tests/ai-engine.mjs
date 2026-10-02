@@ -644,6 +644,16 @@ S('F. Captured evidence raises a derived-only report');
   ck('one captured image lifts it out of abstention', withImage.abstain === false, `confidence=${withImage.confidence}`);
   ck('one captured image reaches recommend', withImage.decision === 'recommend', `decision=${withImage.decision}`);
   ck('captured evidence raises confidence over derived alone', withImage.confidence > complete.confidence, `${complete.confidence} -> ${withImage.confidence}`);
+
+  // The content hash is required but not unique in the schema. What actually stops a re-uploaded
+  // file from being double-counted is `cleanEvidence`: it collapses rows sharing
+  // kind|source|timestamp|category, and the API stamps every row of one incident with the same
+  // reported_at. Pin that, so a future per-row timestamp on the capture path is a test failure
+  // rather than a silent doubling of media weight.
+  const duplicated = [...completeDerived, image, { ...image }, { ...image }];
+  const withDuplicates = assessEvidence({ reportedCategory: 'fire', userConfirmed: false, evidence: duplicated });
+  ck('duplicate media rows collapse to one contribution', withDuplicates.confidence === withImage.confidence && withDuplicates.evidence_strength === withImage.evidence_strength, `1 image=${withImage.confidence}, 3 images=${withDuplicates.confidence}`);
+  ck('duplicate media rows do not add independent sources', withDuplicates.source_diversity === withImage.source_diversity, `sources=${withImage.source_diversity} vs ${withDuplicates.source_diversity}`);
 }
 
 // ---------------------------------------------------------------- summary

@@ -44,6 +44,8 @@ jobs:
           done
       - name: Relay protocol tests
         run: node reach-citizen-pwa/js/relay/test-protocol.mjs
+      - name: Evidence capture tests
+        run: node reach-platform/scripts/tests/pwa-evidence-capture.mjs
 
   sql-migrations:
     runs-on: ubuntu-latest

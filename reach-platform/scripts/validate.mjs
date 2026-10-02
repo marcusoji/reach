@@ -127,7 +127,7 @@ if (/attach_incident_evidence[\s\S]{0,400}p_confidence/.test(capture)) throw new
 // and be awarded the image confidence (72) on its word. 0018 makes the strong kinds contingent on a real object.
 const captureHardening = readFileSync(join(root,'supabase/migrations/0018_evidence_capture_hardening.sql'),'utf8');
 if (!captureHardening.includes('A storage path is required for % evidence')) throw new Error('Media kinds must require an uploaded object, not just a claimed kind');
-if (!captureHardening.includes('A content hash is required for % evidence')) throw new Error('Media evidence must be content-addressed so a duplicate is not double-counted');
+if (!captureHardening.includes('A content hash is required for % evidence')) throw new Error('Media evidence must carry a content hash');
 if (!captureHardening.includes("metadata->>'mimetype'")) throw new Error('The stored object content type must be checked against the claimed kind');
 if (!captureHardening.includes('Evidence limit reached for this incident')) throw new Error('One incident must not accept unbounded evidence');
 if (!captureHardening.includes("array['image','audio','video','text','location']")) throw new Error('Capture kinds must be narrowed to what a citizen device can actually produce');

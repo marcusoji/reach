@@ -50,7 +50,9 @@ export function setHTML(target, html) {
  * Compute the lowercase hex SHA-256 of a Blob or ArrayBuffer.
  *
  * Used as the evidence object's content address: the server stores the hash and the object path is
- * derived from it, so re-uploading the same file cannot be counted twice as independent evidence.
+ * derived from it. The engine collapses two media rows that share kind/source/timestamp/category,
+ * and the API stamps every row of one incident with the same reported_at, so re-uploading the same
+ * file cannot be counted as a second independent contribution.
  *
  * @param {Blob|ArrayBuffer|Uint8Array} input
  * @returns {Promise<string>} 64-character lowercase hex digest

@@ -7,6 +7,12 @@
 -- sensor produced this", so the strong kinds must be contingent on an actual uploaded object, not
 -- on the caller's word.
 --
+-- The content hash is required but NOT unique per kind: the engine already collapses two media
+-- rows that share kind/source/timestamp/category, and the API stamps every row of one incident
+-- with the incident's reported_at, so re-uploading the same file cannot add a second independent
+-- contribution. `citext`/unique on (incident_id, content_hash) would be the stronger guard if the
+-- capture path ever starts carrying per-row extraction or timestamps.
+--
 -- The capture kinds are also narrowed. `sensor` and `motion` describe device integrations the PWA
 -- cannot perform, so they stay reachable only through the service-role derived path, where the
 -- server decides the weight.

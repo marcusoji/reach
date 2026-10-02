@@ -209,8 +209,12 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   - **A media kind requires a real uploaded object with a matching content type.** 0017 left
     `storage_path` optional, so a client could claim `image` with no upload at all and collect the
     strongest weight; 0018 requires the path, the content hash, and a `metadata->>'mimetype'` that
-    matches the claimed kind. The hash makes the object content-addressed, so a re-upload is not
-    counted twice as independent evidence.
+    matches the claimed kind. The hash makes the object content-addressed, but note the schema has
+    *no* unique constraint on `content_hash`; double-counting is actually prevented downstream by
+    `cleanEvidence`, which collapses rows sharing `kind|source|timestamp|category`, plus the API
+    stamping every row of one incident with the same `reported_at`. `scripts/tests/ai-engine.mjs`
+    section F pins that collapse. A unique `(incident_id, content_hash)` would be the stronger guard
+    if the capture path ever carries per-row extraction or timestamps.
   - **The fusion confidence is derived server-side from `kind`**, never sent by the client, and
     `corroboration` is deliberately not an accepted capture kind — it must mean independent
     corroboration, not a self-asserted flag. `sensor` and `motion` are likewise not client-capturable:
@@ -231,3 +235,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `recommend` decision; that separation is the point. The exact figures drift with the report's age
   (evidence ages out), so `scripts/tests/ai-engine.mjs` section F pins the qualitative claim --
   derived-only abstains, one captured image reaches `recommend` -- rather than the decimals.
+- **Known limitation — relay-path evidence never rebinds.** When a report is delivered by relay
+  (native bridge or queued signed packet), `sendOrQueueEmergency` binds the capture to the report's
+  idempotency key (`bindEvidence({ reportKey: key })`). Only the *queued-incident* path ever rebinds:
+  `rebindQueuedEvidence` is called from the queue flush (`backend.js:156`) with the real incident id,
+  but the relay path stores nothing for a later rebind — the native path only writes
+  `localStorage['reach_relay_packet_key']`, which has no reader, and `flushEvidenceQueue` passes
+  `row => row.incidentId || null`, so a row bound to a key is skipped forever. The capture therefore
+  uploads to Storage but is never registered against the incident, and the operator cannot see it.
+  Fixing it needs the relay ingest response to carry the created incident id (or a
+  packet-key → incident endpoint) so the client can repoint the row; that is a server + client change
+  and is deliberately left out of scope for the hackathon MVP. Until then, treat relay-path evidence
+  as upload-only.
