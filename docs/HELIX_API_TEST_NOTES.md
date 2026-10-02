@@ -280,6 +280,51 @@ assessments where the model returned usable JSON at all — expect this to be we
 100% given §3.6 — and **Model agreement** is computed only over those, not over all
 assessments.
 
+### 7.1 Why a second opinion was missing
+
+"Model unavailable" used to be undiagnosable. The adapter's failure state lived only in
+memory, and `/system/health` reported the AI as `Configured` purely from the presence of
+env vars — so a provider that had been answering in prose, or whose circuit breaker had
+opened, still looked healthy.
+
+Two changes fix that:
+
+- **`ai_provider_events`** (migration `0016`) records every `/ai/assess` provider attempt
+  with an `outcome`, a classified `failure_kind` and a capped `detail`. `GET
+  /ai/provider-events` returns the last 50, and the AI Performance page renders them as a
+  "Second-opinion provider" panel, translating each kind into plain language.
+- **`/system/health`** now reports the real breaker state — `Healthy`, `Degraded` (last call
+  failed) or `Circuit open` — plus the consecutive-failure count and the last failure, rather
+  than the string `Configured`.
+
+The `failure_kind` values and what they mean:
+
+| kind | meaning |
+| --- | --- |
+| `unconfigured` | No `REACH_AI_ENDPOINT` / `REACH_AI_API_KEY` / `REACH_AI_MODEL` on the server. |
+| `breaker_open` | Circuit open after consecutive failures; the provider is skipped entirely. |
+| `http_error` | The provider returned a non-2xx status. |
+| `network_error` | The provider could not be reached, or the call timed out. |
+| `unparsable_response` | The provider answered with prose and no JSON object. |
+| `invalid_payload` | The provider returned JSON with an unusable `category` or `confidence`. |
+
+### 7.2 Tolerant parse
+
+The strict `JSON.parse` discarded valid assessments from the agentic Helix models, which
+emit the JSON object and then keep talking (§3.6). The adapter now extracts the first
+*balanced* JSON object (`extractLeadingJson`), so a completion of the form
+
+```
+Here is the assessment:
+{"category":"fire","confidence":88,"rationale":"smoke","evidence_labels":["smoke"]}
+
+## Delivery
+...
+```
+
+yields a usable second opinion. A truncated object (no balanced close) and prose containing
+no object at all are still rejected — with `unparsable_response`, not silently.
+
 ## 8. Follow-ups for Launchverse
 
 1. Return a non-2xx status when credit is exhausted, instead of 200 plus prose.

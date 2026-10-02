@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { StatCard } from '../../components/common/StatCard';
 import { Badge, BadgeVariant } from '../../components/common/Badge';
-import { getAiAssessments, isBackendConfigured } from '../../lib/reachApi';
+import { getAiAssessments, getAiProviderEvents, isBackendConfigured } from '../../lib/reachApi';
 
 interface AssessmentMetadata {
   abstain?: boolean;
@@ -12,6 +12,8 @@ interface AssessmentMetadata {
   model_category?: string | null;
   model_confidence?: number | null;
   model_evidence_labels?: string[];
+  evidence_count?: number;
+  model_failure_kind?: string | null;
   decision_basis?: { blockers?: string[] };
 }
 
@@ -25,6 +27,28 @@ interface Assessment {
   decision?: string;
   metadata?: AssessmentMetadata;
 }
+
+interface ProviderEvent {
+  id: string;
+  incident_id?: string | null;
+  outcome: 'ok' | 'failure';
+  model?: string | null;
+  failure_kind?: string | null;
+  detail?: string | null;
+  latency_ms?: number | null;
+  created_at?: string;
+}
+
+// Operator-facing explanation of a failure kind. The point of recording these is that "no second
+// opinion" is otherwise indistinguishable from "the model was never asked".
+const failureExplanation: Record<string, string> = {
+  unconfigured: 'No provider is configured on the server.',
+  breaker_open: 'The provider circuit is open after repeated failures.',
+  http_error: 'The provider returned an error status.',
+  network_error: 'The provider could not be reached.',
+  unparsable_response: 'The provider replied in prose instead of JSON.',
+  invalid_payload: 'The provider replied with an unusable category or confidence.',
+};
 
 const agreementVariant = (agreement?: string): BadgeVariant => {
   if (agreement === 'agree') return 'success';
@@ -40,10 +64,12 @@ const agreementLabel = (agreement?: string) => {
 
 export const AiPerformancePage: React.FC = () => {
   const [items, setItems] = useState<Assessment[]>([]);
+  const [events, setEvents] = useState<ProviderEvent[]>([]);
 
   useEffect(() => {
     if (isBackendConfigured) {
       void getAiAssessments().then((r) => setItems((r.data || []) as Assessment[])).catch(() => undefined);
+      void getAiProviderEvents().then((r) => setEvents((r.data || []) as ProviderEvent[])).catch(() => undefined);
     }
   }, []);
 
@@ -84,6 +110,35 @@ export const AiPerformancePage: React.FC = () => {
         </div>
 
         <div className="reach-card" style={{ padding: '1.5rem', gap: '1.25rem' }}>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Second-opinion provider</h2>
+          <div className="key-value-list" style={{ padding: 0 }}>
+            {events.length === 0 ? (
+              <p>No provider calls have been recorded.</p>
+            ) : (
+              events.slice(0, 12).map((e) => (
+                <div key={e.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', padding: '0.5rem 0', borderBottom: '1px solid var(--reach-border-subtle)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <Badge variant={e.outcome === 'ok' ? 'success' : 'danger'}>
+                      {e.outcome === 'ok' ? 'Second opinion used' : 'No second opinion'}
+                    </Badge>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--reach-text-secondary)' }}>
+                      {e.incident_id ? e.incident_id.slice(0, 8) : '—'}
+                      {e.outcome === 'ok' && e.latency_ms != null ? ` · ${e.latency_ms}ms` : ''}
+                    </span>
+                  </div>
+                  {e.outcome === 'failure' && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--reach-text-secondary)' }}>
+                      {failureExplanation[e.failure_kind || ''] || 'The provider produced no usable assessment.'}
+                      {e.detail ? ` (${e.detail})` : ''}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="reach-card" style={{ padding: '1.5rem', gap: '1.25rem' }}>
           <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Recent assessments</h2>
           <div className="key-value-list" style={{ padding: 0 }}>
             {items.length === 0 ? (
@@ -115,8 +170,12 @@ export const AiPerformancePage: React.FC = () => {
                           : ''}
                       </>
                     ) : (
-                      'No second opinion was used for this assessment; the deterministic engine alone decided.'
+                      <>
+                        No second opinion was used.{' '}
+                        {failureExplanation[x.metadata?.model_failure_kind || ''] || 'The deterministic engine alone decided.'}
+                      </>
                     )}
+                    {typeof x.metadata?.evidence_count === 'number' ? ` · ${x.metadata.evidence_count} evidence item(s) fused` : ''}
                   </div>
                   {x.metadata?.abstain && x.metadata?.decision_basis?.blockers?.length ? (
                     <div style={{ fontSize: '0.8rem', color: 'var(--reach-text-muted)' }}>

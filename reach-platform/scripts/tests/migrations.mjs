@@ -87,7 +87,8 @@ if (failures.length) {
 // unauthenticated clients. Granting execute to `authenticated` is intended (the app calls
 // these as a signed-in user); what must never remain is PUBLIC (`=`) or `anon` access.
 const privileged = ['create_staff_invite', 'redeem_staff_invite', 'create_incident_for_current_user',
-  'transition_incident', 'assign_incident', 'ingest_relay_packet', 'promote_current_user_to_operator'];
+  'transition_incident', 'assign_incident', 'ingest_relay_packet', 'promote_current_user_to_operator',
+  'ingest_incident_evidence_service', 'store_ai_assessment_for_incident'];
 const privCheck = psql(['-d', dbName, '-tAc',
   `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='public' and p.prosecdef and p.proname = any(array[${privileged.map((p) => `'${p}'`).join(',')}])

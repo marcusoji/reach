@@ -82,6 +82,32 @@ if (!reachApi.includes("'/ai/assess'")) throw new Error('No client path runs an 
 const allIncidents = readFileSync(join(root,'src/pages/operator/AllIncidentsPage.tsx'),'utf8');
 if (!allIncidents.includes('assessIncident')) throw new Error('Incidents page does not expose the assessment trigger');
 
+// Evidence ingestion. incident_evidence existed but was never written, so every assessment fused
+// an empty set and abstained. The derivation must exist and stay off the client-callable path:
+// a client-writable evidence set lets a caller manufacture `corroboration`, which is weighted 0.8.
+const evidenceIngest = readFileSync(join(root,'supabase/migrations/0015_evidence_ingestion.sql'),'utf8');
+if (!evidenceIngest.includes('ingest_incident_evidence_service')) throw new Error('No path ingests incident evidence: the engine always fuses an empty set');
+if (!evidenceIngest.includes('to service_role')) throw new Error('Evidence ingest must be restricted to service_role');
+if (!evidenceIngest.includes('from authenticated')) throw new Error('Evidence ingest must not be callable by authenticated clients');
+if (!evidenceIngest.includes("'user_report'")) throw new Error('Evidence kind vocabulary must cover the engine EvidenceKind values');
+if (!api.includes('deriveEvidenceFromIncident')) throw new Error('The API must derive evidence from an incident when none is supplied');
+if (!api.includes("rpc('ingest_incident_evidence_service'")) throw new Error('Derived evidence must be persisted through the ingest RPC');
+if (!api.includes('evidence_count: evidence.length')) throw new Error('Assessment metadata must record how much evidence was fused');
+
+// Provider telemetry. "No second opinion" is otherwise indistinguishable from "the model was
+// never called": the adapter state is in-memory and /system/health reported only env config.
+const telemetry = readFileSync(join(root,'supabase/migrations/0016_ai_provider_telemetry.sql'),'utf8');
+if (!telemetry.includes('ai_provider_events')) throw new Error('Provider failures are not recorded, so a dead provider is invisible');
+if (!telemetry.includes('enable row level security')) throw new Error('Provider telemetry must have RLS enabled');
+if (!api.includes("from('ai_provider_events')")) throw new Error('The API must record provider outcomes');
+if (!api.includes("path === '/ai/provider-events'")) throw new Error('Provider telemetry must be readable by an operator');
+if (!api.includes('aiLastFailureKind()')) throw new Error('The API must report why a second opinion was missing');
+if (!api.includes('aiCircuitSnapshot()')) throw new Error('System health must report the real provider breaker state, not just env config');
+const aiProvider = readFileSync(join(root,'supabase/functions/api/ai_provider.ts'),'utf8');
+if (!aiProvider.includes('extractLeadingJson')) throw new Error('Provider JSON wrapped in agent chatter must be recoverable');
+if (!aiProvider.includes('unparsable_response')) throw new Error('Provider failures must be classified for telemetry');
+if (!aiPage.includes('failureExplanation')) throw new Error('AI performance page must explain why a second opinion was missing');
+
 // Static checks above cannot catch SQL that fails to parse or run. Execute the migrations
 // against a throwaway Postgres+PostGIS when one is reachable (see scripts/tests/migrations.mjs).
 const migrations = join(dirname(fileURLToPath(import.meta.url)), 'tests', 'migrations.mjs');

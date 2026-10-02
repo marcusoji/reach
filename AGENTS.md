@@ -170,12 +170,31 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   has not been verified against the live endpoint (`ai-engine.mjs` section G pins both).
 - Launchverse model choice matters: the agentic Helix models (`helix-autopilot`, `helix/swe-v1`,
   `helix/devops-v1`) return the correct JSON object **followed by an agent work report** ("## Delivery
-  …"), so the strict parse rejects a valid assessment. `helix-operator` is scope-blocked. Use
-  `helix-advisor`, which returns bare JSON. Even so the second opinion is intermittent — `helix-advisor`
-  sometimes answers in prose at `temperature: 0` — so `model_agreement: 'none'` is normal, not a bug.
+  …"). `helix-operator` is scope-blocked. Use `helix-advisor`, which returns bare JSON. Even so the
+  second opinion is intermittent — `helix-advisor` sometimes answers in prose at `temperature: 0` —
+  so `model_agreement: 'none'` is normal, not a bug. The adapter now recovers the *leading* balanced
+  JSON object (`extractLeadingJson`), so a completion that prefixes a sentence or trails a work report
+  still yields a usable second opinion; only a completion with no JSON object at all is rejected.
   See `docs/HELIX_API_TEST_NOTES.md` §2.1, §3.6, §3.7.
 - The model's contribution is persisted in `ai_assessments.metadata` (migration `0014`), not just the
   audit log. Without it `model_agreement` cannot be queried back and the operator view can only show
   the fused result. The assessment is triggered deliberately by the operator (All Incidents → "Run AI
   assessment") rather than automatically, because each call can spend a daily Helix query; the verdict
   and the second opinion are read back on the AI Performance page. Keep those two pages in step.
+- Evidence: nothing wrote to `incident_evidence` before migration `0015`, so the engine always fused an
+  empty set and every assessment abstained with `no_usable_evidence`. The API now derives a deliberately
+  weak evidence set from the incident (`deriveEvidenceFromIncident`) and persists it via
+  `ingest_incident_evidence_service`, which is **service_role only**: a client-callable version would
+  let any signed-in user manufacture `corroboration` (weighted 0.8, second only to `user_report`) and
+  push an assessment past the confidence threshold. Keep the derived items weak enough that a single
+  incident still abstains. `0015` also widens the `incident_evidence.evidence_type` check to the union
+  of the old vocabulary and the engine's `EvidenceKind` values — the two had drifted, and
+  `user_report`, `motion` and `corroboration` were being rejected on write.
+- Provider telemetry (`ai_provider_events`, migration `0016`): "no second opinion" was previously
+  indistinguishable from "the model was never called", because the adapter's failure state is in-memory
+  and `/system/health` reported only env configuration. Every `/ai/assess` call now records an outcome
+  and a classified `failure_kind` (`unconfigured`, `breaker_open`, `http_error`, `network_error`,
+  `unparsable_response`, `invalid_payload`), readable at `GET /ai/provider-events` and surfaced on the
+  AI Performance page. `/system/health` reports the real breaker state (`Healthy` / `Degraded` /
+  `Circuit open`) instead of the string `Configured`. Telemetry writes are best-effort and must never
+  fail the assessment.

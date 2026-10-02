@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0';
 import { assessEvidence } from './ai_engine.ts';
-import { modelAssist } from './ai_provider.ts';
+import { modelAssist, aiLastFailure, aiLastFailureKind, aiCircuitSnapshot } from './ai_provider.ts';
 import { bmoni, bmoniConfigured } from './bmoni.ts';
 import { verifyRelayBody } from './relay_verify.ts';
 
@@ -76,6 +76,37 @@ function numberValue(value: unknown, min: number, max: number): number | null {
 function requireUuid(value: string | null): string {
   if (!value || !/^[0-9a-f-]{36}$/i.test(value)) throw new Error('Invalid resource id');
   return value;
+}
+
+/** Derive the deterministic engine's evidence set from an incident that already exists.
+ *
+ * Nothing ever wrote to incident_evidence, so every assessment fused an empty set and abstained
+ * with `no_usable_evidence`. These items are a projection of what the incident already records --
+ * not independent observations -- so they are kept deliberately weak: a single `user_report` at a
+ * moderate confidence cannot on its own reach the 60% confidence threshold. That keeps the
+ * abstention behaviour intact while giving the engine something real to reason about, and leaves
+ * the strong kinds (corroboration, sensor, image) for genuine evidence captured at the source.
+ *
+ * The derived rows are persisted through ingest_incident_evidence_service on the service-role path
+ * (RLS forbids this derivation), then read back so the engine fuses exactly what is stored. */
+function deriveEvidenceFromIncident(incident: any, description: string | null, reportedCategory: string | null) {
+  const evidence: any[] = [];
+  const category = reportedCategory ?? incident.category ?? undefined;
+  const base = {
+    category: allowedCategories.has(category) ? category : undefined,
+    timestamp: incident.reported_at,
+  };
+  evidence.push({ kind: 'user_report', confidence: 60, quality: 1, ...base });
+  if (description) evidence.push({ kind: 'text', confidence: 55, quality: 1, ...base });
+  // One location item, not two: the engine dedupes on kind|source|timestamp|category, so a second
+  // item with the same fields would be dropped and its higher confidence lost.
+  if (incident.location_label || incident.location_accuracy_m != null) {
+    const precise = incident.location_accuracy_m != null && Number(incident.location_accuracy_m) <= 100;
+    evidence.push({ kind: 'location', confidence: precise ? 60 : 40, quality: 1, ...base });
+  }
+  // A relay packet is a weaker channel than a direct PWA report.
+  if (incident.via_relay) evidence.push({ kind: 'relay', confidence: 50, quality: 1, ...base });
+  return evidence;
 }
 
 Deno.serve(async (req) => {
@@ -755,14 +786,41 @@ Deno.serve(async (req) => {
       const body = await readJsonLimited(req);
       const incidentId = requireUuid(textValue(body.incident_id, 64));
       // Authorize the incident BEFORE calling any external AI provider.
-      const { data: incidentForAi, error: incidentForAiError } = await supabase.from('incidents').select('id,category,institution_id,reporter_id').eq('id', incidentId).single();
+      const { data: incidentForAi, error: incidentForAiError } = await supabase.from('incidents').select('id,category,institution_id,reporter_id,description,location_label,location_accuracy_m,via_relay,reported_at').eq('id', incidentId).single();
       if (incidentForAiError || !incidentForAi) return json({ error: 'Incident not found' }, 404);
       if (profile.institution_id && incidentForAi.institution_id !== profile.institution_id && !['operator','super-admin'].includes(profile.role)) return json({ error: 'Not permitted' }, 403);
       if (!profile.institution_id && !['operator','super-admin'].includes(profile.role) && incidentForAi.reporter_id !== user.id) return json({ error: 'Not permitted' }, 403);
-      const evidence = Array.isArray(body.evidence) ? body.evidence.slice(0, 50) : [];
-      const modelResult = await modelAssist({ category: textValue(body.reported_category,30) ?? undefined, description: textValue(body.description,4000) ?? undefined, evidence });
+
+      const reportedCategory = textValue(body.reported_category, 30) ?? null;
+      const description = textValue(body.description, 4000) ?? incidentForAi.description ?? null;
+
+      // Evidence supplied by the caller wins; otherwise derive and persist it from the incident so
+      // the engine fuses a real set instead of abstaining on an empty one. Derivation needs
+      // service-role rights (see ingest_incident_evidence_service), and a failure there must not
+      // fail the assessment: the engine simply runs with whatever evidence is available.
+      let evidence = Array.isArray(body.evidence) ? body.evidence.slice(0, 50) : [];
+      if (evidence.length === 0) {
+        try {
+          const service = requireService();
+          const derived = deriveEvidenceFromIncident(incidentForAi, description, reportedCategory);
+          if (derived.length) {
+            const { error: ingestError } = await service.rpc('ingest_incident_evidence_service', { p_incident_id: incidentId, p_evidence: derived });
+            if (ingestError) throw ingestError;
+          }
+          const { data: stored } = await supabase.from('incident_evidence').select('evidence_type,confidence,metadata').eq('incident_id', incidentId);
+          evidence = (stored ?? []).map((row: any) => ({
+            kind: row.evidence_type,
+            confidence: Number(row.confidence ?? 0) / 100,
+            quality: Number(row.metadata?.quality ?? 1),
+            timestamp: incidentForAi.reported_at,
+            category: allowedCategories.has(reportedCategory ?? incidentForAi.category) ? (reportedCategory ?? incidentForAi.category) : undefined,
+          }));
+        } catch { /* assessment proceeds without persisted evidence */ }
+      }
+
+      const modelResult = await modelAssist({ category: reportedCategory ?? undefined, description: description ?? undefined, evidence });
       const result = assessEvidence({
-        reportedCategory: textValue(body.reported_category, 30) ?? undefined,
+        reportedCategory: reportedCategory ?? undefined,
         userConfirmed: typeof body.user_confirmed === 'boolean' ? body.user_confirmed : undefined,
         evidence,
         locationAccuracyM: body.location_accuracy_m == null ? undefined : numberValue(body.location_accuracy_m, 0, 100000) ?? undefined,
@@ -770,11 +828,29 @@ Deno.serve(async (req) => {
         modelAssist: modelResult ? { category: modelResult.category, confidence: modelResult.confidence / 100 } : null,
       });
       const finalResult = modelResult ? { ...result, explanation: `${result.explanation} Model rationale: ${modelResult.rationale}`, model_used: true, model_category: modelResult.category, model_confidence: modelResult.confidence, model_evidence_labels: modelResult.evidence_labels ?? [] } : { ...result, model_used: false };
+
+      // Record why a second opinion was missing. The provider's in-memory state is not queryable and
+      // /system/health reports only env configuration, so without this an operator cannot tell
+      // "the model declined" from "the model was never called".
+      try {
+        const service = requireService();
+        const kind = modelResult ? null : aiLastFailureKind();
+        await service.from('ai_provider_events').insert({
+          institution_id: incidentForAi.institution_id ?? profile.institution_id ?? null,
+          incident_id: incidentId,
+          outcome: modelResult ? 'ok' : 'failure',
+          model: modelResult?.model ?? Deno.env.get('REACH_AI_MODEL') ?? null,
+          failure_kind: kind,
+          detail: modelResult ? null : (aiLastFailure() || null),
+          latency_ms: modelResult?.latency_ms ?? null,
+        });
+      } catch { /* telemetry must never break the assessment */ }
+
       const { data, error } = await supabase.rpc('store_ai_assessment_for_incident', {
         p_incident_id: incidentId, p_model_name: finalResult.model_name, p_category: finalResult.category,
         p_confidence: finalResult.confidence, p_fp_code: finalResult.fp_code, p_evidence_ids: [],
         p_explanation: finalResult.explanation, p_decision: finalResult.decision,
-        p_metadata: { evidence_strength: finalResult.evidence_strength, margin: finalResult.margin, abstain: finalResult.abstain, reasons: finalResult.reasons, decision_basis: finalResult.decision_basis, model_used: finalResult.model_used, model_agreement: finalResult.model_agreement, model_category: finalResult.model_category ?? null, model_confidence: finalResult.model_confidence ?? null, model_evidence_labels: finalResult.model_evidence_labels ?? [], urgency: finalResult.urgency }
+        p_metadata: { evidence_strength: finalResult.evidence_strength, margin: finalResult.margin, abstain: finalResult.abstain, reasons: finalResult.reasons, decision_basis: finalResult.decision_basis, model_used: finalResult.model_used, model_agreement: finalResult.model_agreement, model_category: finalResult.model_category ?? null, model_confidence: finalResult.model_confidence ?? null, model_evidence_labels: finalResult.model_evidence_labels ?? [], evidence_count: evidence.length, model_failure_kind: modelResult ? null : aiLastFailureKind(), urgency: finalResult.urgency }
       });
       if (error) throw error;
       return json({ data: { assessment: data, ...finalResult } }, 201);
@@ -785,6 +861,15 @@ Deno.serve(async (req) => {
       // metadata carries the fusion signals (model_agreement, model_used, model_category,
       // model_confidence, blockers) that make the second opinion auditable in the operator view.
       const { data, error } = await supabase.from('ai_assessments').select('id,incident_id,model_name,category,confidence,fp_code,explanation,decision,metadata,created_at').order('created_at', { ascending: false }).limit(50);
+      if (error) throw error;
+      return json({ data: data ?? [] });
+    }
+
+    if (path === '/ai/provider-events' && req.method === 'GET') {
+      if (!['operator', 'super-admin'].includes(profile.role)) return json({ error: 'Not permitted' }, 403);
+      // Why a second opinion was missing: 'ok' vs a failure kind, so "the model declined" is
+      // distinguishable from "the model was never called".
+      const { data, error } = await supabase.from('ai_provider_events').select('id,incident_id,outcome,model,failure_kind,detail,latency_ms,created_at').order('created_at', { ascending: false }).limit(50);
       if (error) throw error;
       return json({ data: data ?? [] });
     }
@@ -809,15 +894,20 @@ Deno.serve(async (req) => {
         supabase.from('incidents').select('id', { head: true, count: 'exact' }),
         supabase.from('relay_packets').select('id', { head: true, count: 'exact' }),
       ]);
+      const aiConfigured = Boolean(Deno.env.get('REACH_AI_ENDPOINT') && Deno.env.get('REACH_AI_API_KEY') && Deno.env.get('REACH_AI_MODEL'));
+      const circuit = aiCircuitSnapshot();
+      // 'Configured' alone hid a dead provider: a provider whose breaker is open is unreachable for
+      // now, and one that answered with unusable content last time is degraded. Report that.
+      const aiStatus = !aiConfigured ? 'Not configured' : circuit.open ? 'Circuit open' : aiLastFailureKind() ? 'Degraded' : 'Healthy';
       const checks = [
         { service: 'REACH API', status: 'Healthy', latency_ms: Date.now() - started },
         { service: 'PostgreSQL / Supabase', status: dbProbe.error ? 'Unhealthy' : 'Healthy', error: dbProbe.error?.message ?? null },
         { service: 'Incident store', status: incidentProbe.error ? 'Unhealthy' : 'Healthy', error: incidentProbe.error?.message ?? null },
         { service: 'Relay store', status: relayProbe.error ? 'Unhealthy' : 'Healthy', error: relayProbe.error?.message ?? null },
         { service: 'BMONI configuration', status: bmoniConfigured() ? 'Configured' : 'Not configured' },
-        { service: 'AI provider', status: Deno.env.get('REACH_AI_ENDPOINT') && Deno.env.get('REACH_AI_API_KEY') && Deno.env.get('REACH_AI_MODEL') ? 'Configured' : 'Not configured' },
+        { service: 'AI provider', status: aiStatus, configured: aiConfigured, consecutive_failures: circuit.failures, last_failure_kind: aiLastFailureKind(), last_failure: aiLastFailure() || null },
       ];
-      return json({ data: checks, checked_at: new Date().toISOString(), overall: checks.some((c) => c.status === 'Unhealthy') ? 'degraded' : 'healthy' });
+      return json({ data: checks, checked_at: new Date().toISOString(), overall: checks.some((c) => c.status === 'Unhealthy' || c.status === 'Circuit open') ? 'degraded' : 'healthy' });
     }
 
     

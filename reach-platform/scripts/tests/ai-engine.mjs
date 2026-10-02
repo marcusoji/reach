@@ -382,7 +382,7 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
 {
   // Deno.env is read at module load (breaker/timeout config), so the stub must exist first.
   globalThis.Deno = { env: { get: () => undefined } };
-  const { modelAssist, aiCircuitSnapshot, resetAiCircuit, aiLastFailure, MODEL_SYSTEM_PROMPT } = await loadTs('ai_provider.ts');
+  const { modelAssist, aiCircuitSnapshot, resetAiCircuit, aiLastFailure, aiLastFailureKind, MODEL_SYSTEM_PROMPT } = await loadTs('ai_provider.ts');
   const realFetch = globalThis.fetch;
   const setEnv = (o) => { globalThis.Deno = { env: { get: (k) => o[k] } }; };
   const okResponse = (obj) => ({ ok: true, json: async () => obj });
@@ -524,6 +524,64 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
     ck('timeout fires near the configured limit, not 6.5s', dt < 500, `took ${dt}ms`);
     ck('an aborted call counts as a failure', aiCircuitSnapshot().failures >= 1, `failures=${aiCircuitSnapshot().failures}`);
   }
+  // ---- failure kinds are reported, not just a null ----
+  {
+    fresh();
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: 'No JSON at all, just prose.' } }] });
+    await modelAssist({ evidence: [] });
+    ck('an unparsable response is reported as such', aiLastFailureKind() === 'unparsable_response', String(aiLastFailureKind()));
+
+    fresh();
+    globalThis.fetch = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    await modelAssist({ evidence: [] });
+    ck('an HTTP error is reported as such', aiLastFailureKind() === 'http_error', String(aiLastFailureKind()));
+
+    fresh();
+    globalThis.fetch = async () => { throw new Error('down'); };
+    await modelAssist({ evidence: [] });
+    ck('a network error is reported as such', aiLastFailureKind() === 'network_error', String(aiLastFailureKind()));
+
+    fresh();
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'bogus', confidence: 50 }) } }] });
+    await modelAssist({ evidence: [] });
+    ck('an unusable payload is reported as such', aiLastFailureKind() === 'invalid_payload', String(aiLastFailureKind()));
+
+    fresh();
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 70 }) } }] });
+    await modelAssist({ evidence: [] });
+    ck('a success clears the failure kind', aiLastFailureKind() === null, String(aiLastFailureKind()));
+
+    resetAiCircuit();
+    setEnv({});
+    await modelAssist({ evidence: [] });
+    ck('an unconfigured provider is reported as such', aiLastFailureKind() === 'unconfigured', String(aiLastFailureKind()));
+  }
+
+  // ---- tolerant parse: agentic models prefix the JSON and then keep talking ----
+  {
+    fresh();
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: 'Here is the assessment:\n{"category":"fire","confidence":88,"rationale":"smoke","evidence_labels":["smoke"]}\n\nLet me know if you need anything else.' } }] });
+    const r = await modelAssist({ evidence: [] });
+    ck('recovers JSON wrapped in agent chatter', r?.category === 'fire' && r.confidence === 88, `got ${r ? r.category : 'null'}`);
+
+    fresh();
+    // A brace inside a string value must not be mistaken for the end of the object.
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: 'Sure: {"category":"medical","confidence":42,"rationale":"brace } inside","evidence_labels":[]} done' } }] });
+    const r2 = await modelAssist({ evidence: [] });
+    ck('handles braces inside string values', r2?.category === 'medical' && r2.confidence === 42, `got ${r2 ? r2.category : 'null'}`);
+
+    fresh();
+    // A truncated object has no balanced close, so it must be rejected rather than half-parsed.
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: '{"category":"fire","confidence":88' } }] });
+    ck('rejects a truncated JSON object', (await modelAssist({ evidence: [] })) === null);
+    ck('a truncated object is an unparsable response', aiLastFailureKind() === 'unparsable_response', String(aiLastFailureKind()));
+
+    fresh();
+    // Prose containing no JSON at all is still a failure.
+    globalThis.fetch = async () => okResponse({ choices: [{ message: { content: "I'm Helix, a software-engineering agent, so I can't take on the REACH Safety Assist role." } }] });
+    ck('prose with no JSON object is still rejected', (await modelAssist({ evidence: [] })) === null);
+  }
+
   // ---- breaker keeps the engine working when the provider is dead ----
   {
     fresh({ ...configured, REACH_AI_BREAKER_THRESHOLD: '2' });

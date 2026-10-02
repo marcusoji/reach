@@ -237,4 +237,64 @@ begin
 end $$;
 \echo 'PASS 9 - NULL-institution desk cannot assign a responder cross-tenant'
 
+-- 10) The evidence-ingest RPC is restricted to service_role. It deletes and replaces an
+--     incident's evidence, and its `corroboration` kind is weighted 0.8 in the fusion, so a
+--     client-callable version would let any signed-in user manufacture the corroboration that
+--     pushes an assessment over the confidence threshold.
+do $$
+declare exposed boolean;
+begin
+  select exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = 'ingest_incident_evidence_service'
+       and (p.proacl is null or exists (
+              select 1 from unnest(p.proacl) a where a::text ~ '^(anon|authenticated|public)?='
+            ))
+  ) into exposed;
+  if exposed then
+    raise exception 'FAIL 10: ingest_incident_evidence_service is callable by anon/authenticated/PUBLIC';
+  end if;
+end $$;
+\echo 'PASS 10 - evidence ingest RPC restricted to service_role'
+
+-- 11) Direct evidence inserts stay impossible for clients, so the RPC above is the only path.
+do $$
+declare inserted boolean := false;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', true);
+  begin
+    insert into incident_evidence (incident_id, evidence_type, confidence)
+    values ((select id from incidents where institution_id = '11111111-1111-1111-1111-111111111111' limit 1),
+            'corroboration', 90);
+    inserted := true;
+  exception
+    when others then inserted := false;
+  end;
+  reset role;
+  if inserted then
+    raise exception 'FAIL 11: a client inserted evidence directly';
+  end if;
+end $$;
+\echo 'PASS 11 - clients cannot insert evidence directly'
+
+-- 12) Provider telemetry is not client-writable: a forged 'ok' would hide a dead provider.
+do $$
+declare inserted boolean := false;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'cccccccc-0000-0000-0000-000000000001', true);
+  begin
+    insert into ai_provider_events (outcome, failure_kind) values ('ok', null);
+    inserted := true;
+  exception
+    when others then inserted := false;
+  end;
+  reset role;
+  if inserted then
+    raise exception 'FAIL 12: a client wrote provider telemetry';
+  end if;
+end $$;
+\echo 'PASS 12 - provider telemetry is not client-writable'
+
 \echo '=== RLS isolation suite complete ==='
