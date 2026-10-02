@@ -25,6 +25,14 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     private var packetHash: String = ""
     private var seq = 0
     private var total = 0
+    // ATT payload ceiling for the link. 23 is the BLE default MTU, so 20 bytes is the largest
+    // value a characteristic write may carry until the peer grants a larger MTU. Writing more
+    // than this fails the ATT write, so fragments must be sized from the negotiated MTU.
+    private var fragmentBytes = 20
+    // Chunk size is captured when a transfer starts: the MTU callback arrives asynchronously, and
+    // changing the chunk size midway would make `total` disagree with the fragments actually sent.
+    private var chunkSize = 20
+    private var started = false
     private var completion: (Boolean, String?) -> Unit = { _, _ -> }
     private var finished = false
     private val service = UUID.fromString(RelayProtocol.SERVICE_UUID)
@@ -47,6 +55,8 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
             onComplete(false, null); return
         }
         finished = false
+        started = false
+        fragmentBytes = 20
         pending = packet
         packetId = id
         packetHash = hash
@@ -109,6 +119,9 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
             if (dataChar == null) {
                 finish(false, null); return
             }
+            // Ask for a larger ATT MTU so a packet needs fewer fragments. If the peer refuses we
+            // keep the 20-byte default and stay correct, just slower.
+            try { g.requestMtu(RelayProtocol.REQUESTED_MTU) } catch (_: Exception) { }
             // Subscribe to ACK notifications when available
             ackChar?.let { ch ->
                 g.setCharacteristicNotification(ch, true)
@@ -130,6 +143,13 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
                 handler.postDelayed(ackTimeout, RelayProtocol.ACK_TIMEOUT_MS)
                 // Also try explicit ACK read if notifications unsupported
                 ackChar?.let { g.readCharacteristic(it) }
+            }
+        }
+
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            // ATT payload is MTU minus the 3-byte ATT header; only accept a usable increase.
+            if (status == BluetoothGatt.GATT_SUCCESS && mtu - 3 > fragmentBytes) {
+                fragmentBytes = minOf(mtu - 3, RelayProtocol.MAX_FRAGMENT)
             }
         }
 
@@ -160,15 +180,20 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     }
 
     private fun startFragments(g: BluetoothGatt, packet: ByteArray) {
-        total = (packet.size + RelayProtocol.FRAGMENT - 1) / RelayProtocol.FRAGMENT
+        if (started) return
+        started = true
+        chunkSize = fragmentBytes
+        total = (packet.size + chunkSize - 1) / chunkSize
+        // seq/total are single bytes in the frame header; more than 255 fragments cannot be framed.
+        if (total > 255) { finish(false, null); return }
         seq = 0
         writeNext(g)
     }
 
     private fun writeNext(g: BluetoothGatt) {
         val packet = pending ?: return
-        val start = seq * RelayProtocol.FRAGMENT
-        val end = minOf(packet.size, start + RelayProtocol.FRAGMENT)
+        val start = seq * chunkSize
+        val end = minOf(packet.size, start + chunkSize)
         val chunk = packet.copyOfRange(start, end)
         val header = byteArrayOf(seq.toByte(), total.toByte())
         val frame = header + chunk

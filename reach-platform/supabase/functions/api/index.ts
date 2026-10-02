@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0';
 import { assessEvidence } from './ai_engine.ts';
 import { modelAssist } from './ai_provider.ts';
 import { bmoni, bmoniConfigured } from './bmoni.ts';
-import { canonicalSourceSigned, canonicalRelaySigned, relayFingerprint } from './relay_protocol.ts';
+import { verifyRelayBody } from './relay_verify.ts';
 
 const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
 function corsFor(req: Request) {
@@ -441,72 +441,27 @@ Deno.serve(async (req) => {
 
     if (path === '/relay/packets' && req.method === 'POST') {
       const body = await req.json();
-      const packetKey = textValue(body.packet_key, 160);
-      const packetHash = textValue(body.packet_hash, 256);
-      const sourceDevice = textValue(body.source_device_id, 160);
-      const sourceKey = textValue(body.source_public_key, 4096);
-      const sourceSignature = textValue(body.source_signature, 4096);
-      const sourceSignedPayload = textValue(body.source_signed_payload, 12000);
-      const relayDevice = textValue(body.relay_device_id, 160);
-      const relayKey = textValue(body.relay_public_key, 4096);
-      const relaySignature = textValue(body.relay_signature, 4096);
-      const relaySignedPayload = textValue(body.relay_signed_payload, 12000);
-      if (!packetKey || !packetHash || !sourceDevice || !sourceKey || !sourceSignature || !sourceSignedPayload) return json({ error: 'Authenticated relay identity is required' }, 422);
-      const hops = Number(body.hop_count ?? 0); const maxHops = Number(body.max_hops ?? 6);
-      if (!Number.isInteger(hops) || !Number.isInteger(maxHops) || hops < 0 || maxHops < 1 || maxHops > 6 || hops >= maxHops) return json({ error: 'Invalid relay hop values' }, 422);
-      if (relayDevice && (!relayKey || !relaySignature || !relaySignedPayload)) return json({ error: 'Relay envelope signature is incomplete' }, 422);
-      const derToP1363 = (der: Uint8Array) => {
-        if (der[0] !== 0x30) throw new Error('Invalid ECDSA signature');
-        let i = 2; if (der[i] === 0x81) i += 1;
-        if (der[i++] !== 0x02) throw new Error('Invalid ECDSA R');
-        const rLen = der[i++]; const r = der.slice(i, i + rLen); i += rLen;
-        if (der[i++] !== 0x02) throw new Error('Invalid ECDSA S');
-        const sLen = der[i++]; const ss = der.slice(i, i + sLen);
-        const out = new Uint8Array(64); out.set(r.slice(Math.max(0, r.length - 32)), 32 - Math.min(32, r.length)); out.set(ss.slice(Math.max(0, ss.length - 32)), 64 - Math.min(32, ss.length)); return out;
-      };
-      const canonical = (p: Record<string, unknown>, relay = false) => relay ? canonicalRelaySigned(p) : canonicalSourceSigned(p);
-      const verifyEcdsa = async (publicKeyB64: string, signatureB64: string, message: string) => {
-        try {
-          const keyBytes = Uint8Array.from(atob(publicKeyB64), c => c.charCodeAt(0));
-          const der = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
-          const sigBytes = derToP1363(der);
-          const key = await crypto.subtle.importKey('spki', keyBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-          return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sigBytes, new TextEncoder().encode(message));
-        } catch {
-          // Malformed key/signature bytes are a verification failure, not a server error.
-          return false;
-        }
-      };
-      const sourceFields = { v: body.v ?? 2, k: packetKey, e: Date.parse(String(body.ttl_expires_at)), m: maxHops, incident_id: body.incident_id, source_device_id: sourceDevice, minimal_payload: body.minimal_payload ?? {} };
-      // The signed payload omits x (see relay_protocol.ts): x is sha256 of that payload,
-      // so embedding x in it would require a hash to contain its own digest.
-      if (canonical(sourceFields) !== sourceSignedPayload) return json({ error: 'Source signed payload does not match packet' }, 403);
-      if (!(await verifyEcdsa(sourceKey, sourceSignature, sourceSignedPayload))) return json({ error: 'Invalid source packet signature' }, 403);
-      if ((await relayFingerprint(sourceSignedPayload)) !== packetHash) return json({ error: 'Packet fingerprint mismatch' }, 403);
-      // Gateway dedup: packet_key + packet_hash (multi-path safe: BLE/Wi-Fi/PWA)
       const svc = requireService();
-      const prior = await svc.from('relay_ingest_dedup').select('receive_count').eq('packet_key', packetKey).eq('packet_hash', packetHash).maybeSingle();
-      if (prior.data) {
-        await svc.from('relay_ingest_dedup').update({
-          receive_count: (prior.data.receive_count || 1) + 1,
-          last_seen_at: new Date().toISOString(),
-        }).eq('packet_key', packetKey).eq('packet_hash', packetHash);
-        // Still continue to ingest path — SQL incident create must remain idempotent by fingerprint
-      } else {
-        await svc.from('relay_ingest_dedup').insert({
-          packet_key: packetKey,
-          packet_hash: packetHash,
-          institution_id: profile.institution_id,
-        });
-      }
-
-      if (relayDevice) {
-        const expectedRelaySigned = canonical({ ...body, v: body.v ?? 2, k: packetKey, e: Date.parse(String(body.ttl_expires_at)), h: hops, m: maxHops, incident_id: body.incident_id, source_device_id: sourceDevice, x: packetHash, relay_device_id: relayDevice, minimal_payload: body.minimal_payload ?? {} }, true);
-        if (expectedRelaySigned !== relaySignedPayload) return json({ error: 'Relay signed payload does not match packet' }, 403);
-        if (!(await verifyEcdsa(relayKey!, relaySignature!, relaySignedPayload!))) return json({ error: 'Invalid relay signature' }, 403);
-      }
-      const packet = { ...body, packet_key: packetKey, packet_hash: packetHash, hop_count: hops, max_hops: maxHops, transport: textValue(body.transport, 30) ?? 'native' };
-      const { data, error } = await requireService().rpc('ingest_relay_packet_service', { p_packet: packet, p_actor_id: user.id });
+      const verdict = await verifyRelayBody(body, {
+        actorInstitutionId: profile.institution_id ?? null,
+        dedup: {
+          // Gateway dedup: packet_key + packet_hash (multi-path safe: BLE/Wi-Fi/PWA)
+          async record(packetKey, packetHash, institutionId) {
+            const prior = await svc.from('relay_ingest_dedup').select('receive_count').eq('packet_key', packetKey).eq('packet_hash', packetHash).maybeSingle();
+            if (prior.data) {
+              await svc.from('relay_ingest_dedup').update({
+                receive_count: (prior.data.receive_count || 1) + 1,
+                last_seen_at: new Date().toISOString(),
+              }).eq('packet_key', packetKey).eq('packet_hash', packetHash);
+              // Still continue to the ingest path - SQL incident create must stay idempotent by fingerprint
+            } else {
+              await svc.from('relay_ingest_dedup').insert({ packet_key: packetKey, packet_hash: packetHash, institution_id: institutionId });
+            }
+          },
+        },
+      });
+      if (!verdict.ok) return json({ error: verdict.error }, verdict.status);
+      const { data, error } = await requireService().rpc('ingest_relay_packet_service', { p_packet: verdict.packet, p_actor_id: user.id });
       if (error) throw error;
       return json({ data }, 201);
     }

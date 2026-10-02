@@ -98,6 +98,27 @@ if (exposed.length) {
   process.exit(1);
 }
 
+// The legacy relay ingest RPC (0002/0003) writes relay_packets without verifying the device
+// registration, the packet fingerprint or any signature — those checks live only in the Edge
+// Function and ingest_relay_packet_service(). If `authenticated` can still execute it, a
+// signed-in client can forge relay packets straight through PostgREST, bypassing verification.
+const legacyRelay = psql(['-d', dbName, '-tAc',
+  `select coalesce(array_to_string(p.proacl, ','), '') from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public' and p.proname='ingest_relay_packet'`]);
+const acl = legacyRelay.stdout.trim();
+if (!acl) {
+  console.error('FAIL - ingest_relay_packet not found; expected it to exist but be locked down.');
+  process.exit(1);
+}
+if (/(^|,)(=?authenticated|anon|public)=/.test(acl) || /(^|,)=/.test(acl)) {
+  console.error(`FAIL - legacy ingest_relay_packet is still client-callable (acl: ${acl})`);
+  process.exit(1);
+}
+if (!/service_role=/.test(acl)) {
+  console.error(`FAIL - legacy ingest_relay_packet is not restricted to service_role (acl: ${acl})`);
+  process.exit(1);
+}
+
 const tableCount = psql(['-d', dbName, '-tAc',
   `select count(*) from pg_tables where schemaname='public'`]).stdout.trim();
 // Extension-owned tables (e.g. PostGIS spatial_ref_sys) are not part of the REACH schema.

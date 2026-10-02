@@ -16,7 +16,10 @@ object RelayProtocol {
     const val TTL_MS = 30 * 60 * 1000L // 30 minutes — must match server
     const val MAX_PACKET_BYTES = 48 * 1024
     const val ACK_TIMEOUT_MS = 12_000L
-    const val FRAGMENT = 160
+    // ATT payload for a write is (MTU - 3). 20 is the safe floor at the BLE default MTU of 23;
+    // the ceiling caps what a peer may grant. Fragments are sized from the negotiated MTU.
+    const val REQUESTED_MTU = 517
+    const val MAX_FRAGMENT = 512
 
     fun validate(raw: ByteArray): JSONObject {
         require(raw.size in 32..MAX_PACKET_BYTES) { "Invalid packet size" }

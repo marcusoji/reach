@@ -73,5 +73,25 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - `scripts/tests/ai-engine.mjs` verifies the engine and is in CI via `npm run test:ai`. CI's platform job
   runs Node 20, which cannot `import` a `.ts` file (type stripping landed in 22.6), so the test transpiles
   with the repo's `typescript` dependency instead of relying on the runtime version.
+- Server-side relay verification lives in `supabase/functions/api/relay_verify.ts`, not inline in
+  `index.ts`. `scripts/tests/relay-verify.mjs` imports that exact module (transpiled in memory) so the test
+  cannot drift from production. If you edit the request handler, keep calling `verifyRelayBody`.
+- `public.ingest_relay_packet(jsonb)` (created in 0002/0003) writes `relay_packets` without verifying the
+  device registration, fingerprint or signatures. It is granted to `authenticated` by 0002 and never revoked,
+  so it is a PostgREST bypass of the Edge Function. `0011_relay_ingest_lockdown.sql` restricts it to
+  `service_role`; keep it that way and keep the ACL assertion in `scripts/tests/migrations.mjs`.
+- The source-signed payload does not cover `h` (hop count), so `relay_verify.ts` rejects any packet with
+  `hop_count > 0` that lacks a relay envelope. A forwarding node always adds a relay signature, and that
+  signature does cover `h`. Without this rule a client could upload a packet claiming any hop count.
+- Android BLE fragments must be sized from the negotiated ATT MTU, not a fixed 160 bytes. The default MTU
+  is 23, so a write carries at most 20 bytes; `BleCentralRelay` now requests a larger MTU and captures the
+  chunk size once per transfer (the MTU callback is async — resizing mid-transfer would desync `total`).
+- The PWA and Kotlin BLE fragment headers are still different: `protocol.js` prefixes a 16-byte transfer id
+  (`[id:16][seq:2][total:2]`), while `BleTransfer`/`BleCentralRelay` use `[seq:1][total:1]`. They are only
+  interoperable within a peer group (PWA↔PWA, Android↔Android). Unifying them is a wire-format change; pick
+  one header and update both senders, `BleTransfer`, and the framing tests together.
+- `validate:migrations` executes every migration against Postgres+PostGIS and is now run in CI's
+  `sql-migrations` job via a `postgis/postgis:16-3.4` service container. It skips (exit 0) when no server is
+  reachable, so a local run without Postgres is not a failure.
 - The AI fusion logic lives only in `ai_engine.ts`; the SQL migrations just store assessments
   (`store_ai_assessment_for_incident`) and do not reimplement scoring.

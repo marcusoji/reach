@@ -48,6 +48,9 @@ if (!api.includes('x-idempotency-key is required for payment operations')) throw
 if (!env.includes('VITE_REACH_DEMO_MODE=false')) throw new Error('Explicit demo-mode gate missing');
 if (!bmoniApi.includes('AbortController')) throw new Error('BMONI timeout protection missing');
 if (!api.includes('const txMatch = path.match')) throw new Error('BMONI payment status route missing');
+if (!api.includes('verifyRelayBody(')) throw new Error('Relay verification must use the extracted relay_verify module');
+const relayLockdown = readFileSync(join(root,'supabase/migrations/0011_relay_ingest_lockdown.sql'),'utf8');
+if (!relayLockdown.includes('revoke all on function public.ingest_relay_packet(jsonb) from authenticated')) throw new Error('Legacy relay ingest RPC is still browser-callable');
 
 // Static checks above cannot catch SQL that fails to parse or run. Execute the migrations
 // against a throwaway Postgres+PostGIS when one is reachable (see scripts/tests/migrations.mjs).
