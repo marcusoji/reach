@@ -9,11 +9,15 @@
 - `docs/` — **all** product documentation; start at `docs/README.md`. Keep the root free of loose notes: only `README.md` and `AGENTS.md` live there. Merge new fix logs into `docs/HARDENING_LOG.md` and release notes into `docs/RELEASE_NOTES.md` rather than adding another root `*_FIXES.md`.
 - `tests/` — RLS, BMONI webhook, load (k6) and AI-calibration harnesses.
 - `.github/workflows/ci.yml` — CI gates (platform, PWA syntax, migration order, android, security scripts).
-- `docs/HELIX_API_TEST_NOTES.md` — read-only test of the Helix (Launchverse) credential: endpoint
-  matrix, errors and weaknesses. The token is account/deploy only; it is **not** a REACH runtime
-  dependency and must never be pointed at `REACH_AI_ENDPOINT` (no inference endpoint exists — it 404s
-  and trips the AI circuit breaker in the `/status` health check). Keep the token out of the Edge
-  Function and out of every `VITE_` variable.
+- `docs/HELIX_API_TEST_NOTES.md` — read-only test of the Helix (Launchverse) credentials: endpoint
+  matrix, errors and weaknesses. Two credential types exist on two hosts: `lvse_…` is the
+  account/deploy token for `launchverse.app`; `helix_…` is the inference key for
+  `api.launchverse.app/api/v1/chat/completions`. Inference works, but Helix's agent identity makes it
+  **refuse** REACH's current `modelAssist` system prompt and answer in prose, which fails silently
+  (`JSON.parse` throws → `modelAssist` returns null → circuit breaker opens → `/status` reports the AI
+  provider unhealthy). Do not set `REACH_AI_ENDPOINT` to Launchverse unless the system prompt is
+  neutral and demands JSON only (see §4 of the notes). Keep both credentials out of the Edge Function
+  and out of every `VITE_` variable.
 
 ## Commands (run inside `reach-platform/`)
 
