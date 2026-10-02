@@ -20,6 +20,7 @@
 | [BMONI_DEPLOYMENT.md](./BMONI_DEPLOYMENT.md) | BMONI deploy notes |
 | [BMONI_INTEGRATION_NOTES.md](./BMONI_INTEGRATION_NOTES.md) | **Verified sandbox behaviour** — where BMONI's docs differ from the API |
 | [BMONI_INSTITUTION_BILLING.md](./BMONI_INSTITUTION_BILLING.md) | Institutional billing model |
+| [HELIX_API_TEST_NOTES.md](./HELIX_API_TEST_NOTES.md) | Helix (Launchverse) credential test — errors and weaknesses observed |
 
 ## Architecture and history
 | Document | Purpose |
