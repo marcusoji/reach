@@ -297,4 +297,41 @@ begin
 end $$;
 \echo 'PASS 12 - provider telemetry is not client-writable'
 
+-- 13) The capture RPC is client-callable (a citizen uploads their own photo) but must not be
+--     reachable unauthenticated. It derives the fusion confidence itself, so the risk is not the
+--     weight but anonymous writes into an incident's evidence set.
+do $$
+declare exposed boolean;
+begin
+  select (p.proacl is null or exists (
+            select 1 from unnest(p.proacl) a where a::text ~ '^(anon|public)?='
+          )) into exposed
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'attach_incident_evidence';
+  if exposed then
+    raise exception 'FAIL 13: attach_incident_evidence is callable by anon/PUBLIC';
+  end if;
+end $$;
+\echo 'PASS 13 - capture RPC is not anon-callable'
+
+-- 14) Storage objects are visible only inside the caller's own uid prefix. The path prefix is what
+--     authorises an upload, so a readable foreign object would also be attachable as evidence.
+do $$
+declare visible integer;
+begin
+  insert into storage.objects (bucket_id, name, owner)
+  values ('incident-evidence', 'aaaaaaaa-0000-0000-0000-000000000001/photo.jpg',
+          'aaaaaaaa-0000-0000-0000-000000000001');
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-000000000001', true);
+  select count(*) into visible from storage.objects where bucket_id = 'incident-evidence';
+  reset role;
+
+  if visible <> 0 then
+    raise exception 'FAIL 14: citizen B can read % of citizen A''s evidence object(s)', visible;
+  end if;
+end $$;
+\echo 'PASS 14 - evidence objects are scoped to the uploader''s prefix'
+
 \echo '=== RLS isolation suite complete ==='

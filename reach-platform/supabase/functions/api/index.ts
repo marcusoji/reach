@@ -794,25 +794,37 @@ Deno.serve(async (req) => {
       const reportedCategory = textValue(body.reported_category, 30) ?? null;
       const description = textValue(body.description, 4000) ?? incidentForAi.description ?? null;
 
-      // Evidence supplied by the caller wins; otherwise derive and persist it from the incident so
-      // the engine fuses a real set instead of abstaining on an empty one. Derivation needs
-      // service-role rights (see ingest_incident_evidence_service), and a failure there must not
-      // fail the assessment: the engine simply runs with whatever evidence is available.
+      // Evidence supplied by the caller wins; otherwise derive it from the incident so the engine
+      // fuses a real set instead of abstaining on an empty one. Only the *derived* rows are replaced,
+      // so a citizen's captured photo survives an assessment; the check for "already derived" looks
+      // at those rows specifically, not at captured evidence. Derivation needs service-role rights
+      // (see ingest_incident_evidence_service), and a failure there must not fail the assessment.
       let evidence = Array.isArray(body.evidence) ? body.evidence.slice(0, 50) : [];
       if (evidence.length === 0) {
         try {
           const service = requireService();
-          const derived = deriveEvidenceFromIncident(incidentForAi, description, reportedCategory);
-          if (derived.length) {
-            const { error: ingestError } = await service.rpc('ingest_incident_evidence_service', { p_incident_id: incidentId, p_evidence: derived });
-            if (ingestError) throw ingestError;
+          const { count: derivedCount } = await supabase.from('incident_evidence')
+            .select('id', { count: 'exact', head: true })
+            .eq('incident_id', incidentId)
+            .eq('metadata->>derived', 'true');
+          if (!derivedCount) {
+            const derived = deriveEvidenceFromIncident(incidentForAi, description, reportedCategory);
+            if (derived.length) {
+              const { error: ingestError } = await service.rpc('ingest_incident_evidence_service', { p_incident_id: incidentId, p_evidence: derived });
+              if (ingestError) throw ingestError;
+            }
           }
-          const { data: stored } = await supabase.from('incident_evidence').select('evidence_type,confidence,metadata').eq('incident_id', incidentId);
+          const { data: stored } = await supabase.from('incident_evidence')
+            .select('evidence_type,confidence,metadata,source,storage_path')
+            .eq('incident_id', incidentId);
           evidence = (stored ?? []).map((row: any) => ({
             kind: row.evidence_type,
             confidence: Number(row.confidence ?? 0) / 100,
             quality: Number(row.metadata?.quality ?? 1),
             timestamp: incidentForAi.reported_at,
+            source: row.source ?? undefined,
+            // Captured media is real, independent evidence; a stored object path proves an upload.
+            storage_path: row.storage_path ?? undefined,
             category: allowedCategories.has(reportedCategory ?? incidentForAi.category) ? (reportedCategory ?? incidentForAi.category) : undefined,
           }));
         } catch { /* assessment proceeds without persisted evidence */ }
@@ -870,6 +882,51 @@ Deno.serve(async (req) => {
       // Why a second opinion was missing: 'ok' vs a failure kind, so "the model declined" is
       // distinguishable from "the model was never called".
       const { data, error } = await supabase.from('ai_provider_events').select('id,incident_id,outcome,model,failure_kind,detail,latency_ms,created_at').order('created_at', { ascending: false }).limit(50);
+      if (error) throw error;
+      return json({ data: data ?? [] });
+    }
+
+    // Capture path for the strong evidence kinds (image/audio/sensor/motion). The client uploads the
+    // object to Storage first, then registers it here; attach_incident_evidence re-checks ownership
+    // of the path and derives the fusion confidence server-side.
+    if (path === '/evidence' && req.method === 'POST') {
+      const body = await readJsonLimited(req);
+      const incidentId = requireUuid(textValue(body.incident_id, 64));
+      const kind = textValue(body.kind, 20);
+      const captureKinds = ['image', 'audio', 'video', 'sensor', 'motion', 'text', 'location'];
+      if (!kind || !captureKinds.includes(kind)) return json({ error: 'Unsupported evidence kind' }, 400);
+      const storagePath = textValue(body.storage_path, 512);
+      // metadata is untrusted client input; bound it and keep it an object so it cannot replace the
+      // `captured` marker the RPC merges in.
+      const rawMetadata = body.metadata;
+      const metadata = rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)
+        ? Object.fromEntries(Object.entries(rawMetadata as Record<string, unknown>).slice(0, 12).map(([k, v]) => [String(k).slice(0, 40), typeof v === 'string' ? v.slice(0, 200) : v]))
+        : {};
+      const { data, error } = await supabase.rpc('attach_incident_evidence', {
+        p_incident_id: incidentId,
+        p_kind: kind,
+        p_storage_path: storagePath,
+        p_content_hash: textValue(body.content_hash, 128),
+        p_metadata: metadata,
+      });
+      if (error) {
+        // The RPC raises for authorization and validation; surface it as a 4xx, not a 500.
+        return json({ error: error.message }, 403);
+      }
+      return json({ data }, 201);
+    }
+
+    if (path === '/evidence' && req.method === 'GET') {
+      const incidentId = requireUuid(textValue(url.searchParams.get('incident_id'), 64));
+      const { data: incidentForEvidence, error: incidentError } = await supabase.from('incidents').select('id,reporter_id,institution_id').eq('id', incidentId).single();
+      if (incidentError || !incidentForEvidence) return json({ error: 'Incident not found' }, 404);
+      const allowed = incidentForEvidence.reporter_id === user.id
+        || (profile.institution_id && incidentForEvidence.institution_id === profile.institution_id)
+        || ['operator', 'super-admin'].includes(profile.role);
+      if (!allowed) return json({ error: 'Not permitted' }, 403);
+      const { data, error } = await supabase.from('incident_evidence')
+        .select('id,incident_id,evidence_type,confidence,storage_path,content_hash,metadata,created_at')
+        .eq('incident_id', incidentId).order('created_at', { ascending: false });
       if (error) throw error;
       return json({ data: data ?? [] });
     }

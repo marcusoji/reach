@@ -44,3 +44,40 @@ do $$ begin
     create publication supabase_realtime;
   end if;
 end $$;
+
+-- Supabase Storage scaffolding. Migration 0017 creates the 'incident-evidence' bucket and its
+-- object policies, so the objects/buckets tables and storage.foldername() must exist here.
+create schema if not exists storage;
+
+create table if not exists storage.buckets (
+  id text primary key,
+  name text not null,
+  owner uuid,
+  public boolean default false,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets(id),
+  name text,
+  owner uuid,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  metadata jsonb
+);
+
+alter table storage.objects enable row level security;
+
+-- Supabase's helper: splits an object path into its folder segments.
+create or replace function storage.foldername(name text) returns text[] language plpgsql immutable as $$
+declare
+  parts text[];
+begin
+  parts := string_to_array(name, '/');
+  return parts[1:array_length(parts, 1) - 1];
+end $$;
+
+grant usage on schema storage to anon, authenticated, service_role;
+grant execute on function storage.foldername(text) to anon, authenticated, service_role;

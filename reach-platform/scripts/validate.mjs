@@ -108,6 +108,21 @@ if (!aiProvider.includes('extractLeadingJson')) throw new Error('Provider JSON w
 if (!aiProvider.includes('unparsable_response')) throw new Error('Provider failures must be classified for telemetry');
 if (!aiPage.includes('failureExplanation')) throw new Error('AI performance page must explain why a second opinion was missing');
 
+// Evidence capture. 0015 only derived evidence from the incident, so the strong fusion kinds
+// (image/audio/sensor/motion) were unreachable. The capture path must exist and must not let a
+// client award itself the strong weights or reach another user's upload.
+const capture = readFileSync(join(root,'supabase/migrations/0017_evidence_capture.sql'),'utf8');
+if (!capture.includes('attach_incident_evidence')) throw new Error('No path attaches captured evidence: the strong evidence kinds are unreachable');
+if (!capture.includes("values ('incident-evidence'")) throw new Error('Evidence storage bucket is not declared');
+if (!capture.includes('foldername(name))[1] = auth.uid()::text')) throw new Error('Evidence objects must be scoped to the uploader uid prefix');
+if (!capture.includes('your own evidence prefix')) throw new Error('The RPC must re-check the storage path prefix, not trust the client');
+if (!capture.includes("coalesce(metadata->>'derived'")) throw new Error('Derived ingest must not delete captured evidence');
+if (!api.includes("path === '/evidence'")) throw new Error('No API route registers captured evidence');
+if (!reachApi.includes('uploadIncidentEvidence')) throw new Error('No client path uploads captured evidence');
+if (!allIncidents.includes('attachFile')) throw new Error('Operators cannot attach captured evidence');
+// A capture-kind confidence must be server-derived: the client sends no confidence field.
+if (/attach_incident_evidence[\s\S]{0,400}p_confidence/.test(capture)) throw new Error('Capture confidence must not be client-supplied');
+
 // Static checks above cannot catch SQL that fails to parse or run. Execute the migrations
 // against a throwaway Postgres+PostGIS when one is reachable (see scripts/tests/migrations.mjs).
 const migrations = join(dirname(fileURLToPath(import.meta.url)), 'tests', 'migrations.mjs');

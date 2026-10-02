@@ -325,6 +325,27 @@ Here is the assessment:
 yields a usable second opinion. A truncated object (no balanced close) and prose containing
 no object at all are still rejected — with `unparsable_response`, not silently.
 
+### 7.3 Evidence capture
+
+The fusion engine weights `image` highest (0.7) and `corroboration` second (0.8), but until
+migration `0017` nothing could produce either: evidence was only ever *derived* from what the
+incident already recorded, so the engine was capped in `assist` and the second opinion had
+little to agree or disagree with.
+
+Captured media now flows through the private `incident-evidence` bucket:
+
+1. The client uploads the file to `${uid}/${sha256}.${ext}` in Supabase Storage.
+2. It calls `POST /evidence` with the incident, the kind and that path.
+3. `attach_incident_evidence` re-checks that the path begins with the caller's own uid, that the
+   object exists, and that the caller may act on the incident — then derives the fusion
+   confidence from the kind.
+
+Two deliberate limits. The client never sends a confidence, so a caller cannot award itself the
+strong-kind weights; and `corroboration` is not an accepted capture kind, because it has to mean
+independent corroboration rather than a flag a client sets on itself. The effect on a real
+incident is visible: derived evidence alone abstains at ~51%, one captured image takes it to
+~69% and a `recommend` decision.
+
 ## 8. Follow-ups for Launchverse
 
 1. Return a non-2xx status when credit is exhausted, instead of 200 plus prose.

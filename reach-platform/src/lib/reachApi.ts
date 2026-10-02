@@ -180,6 +180,42 @@ export async function getInstitutionSummary() { return apiFetch<{ data: any }>('
 export async function getOperatorSummary() { return apiFetch<{ data: any }>('/operator/summary'); }
 export async function getAiAssessments() { return apiFetch<{ data: any[] }>('/ai/assessments'); }
 export async function getAiProviderEvents() { return apiFetch<{ data: any[] }>('/ai/provider-events'); }
+// Captured evidence (image/audio/sensor/motion). The object is uploaded to Storage first under
+// `${userId}/...`, then registered here; the server re-checks that prefix and derives the fusion
+// confidence, so a client cannot award itself the strong-kind weights.
+export async function attachIncidentEvidence(payload: { incident_id: string; kind: string; storage_path?: string; content_hash?: string; metadata?: Record<string, unknown> }) {
+  return apiFetch<{ data: any }>('/evidence', { method: 'POST', body: JSON.stringify(payload) });
+}
+export async function listIncidentEvidence(incidentId: string) {
+  return apiFetch<{ data: any[] }>(`/evidence?incident_id=${encodeURIComponent(incidentId)}`);
+}
+
+/** Upload a captured file to Supabase Storage and register it as evidence.
+ *
+ * The object path MUST start with the uploader's own uid: the storage.objects policy and
+ * attach_incident_evidence both require that prefix, so it is not optional. Content-addressed by
+ * SHA-256 so re-uploading the same file cannot be counted twice as independent evidence. */
+export async function uploadIncidentEvidence(incidentId: string, kind: string, file: File, metadata: Record<string, unknown> = {}) {
+  const session = getStoredSession();
+  if (!session?.user?.id) throw new Error('Authentication required to attach evidence');
+  if (!SUPABASE_URL) throw new Error('Storage is not configured');
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  const hash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  const storagePath = `${session.user.id}/${hash}.${ext}`;
+  const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/incident-evidence/${storagePath}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
+    body: file,
+  });
+  if (!upload.ok) throw new Error(`Upload failed (${upload.status})`);
+  return attachIncidentEvidence({ incident_id: incidentId, kind, storage_path: storagePath, content_hash: hash, metadata: { ...metadata, size: file.size, mime: file.type || null } });
+}
 // Run the deterministic engine, optionally with an external second opinion. The engine decides;
 // a model result only contributes a bounded adjustment and can never force an autonomous action.
 export async function runAiAssessment(incidentId: string, payload: { description?: string; evidence?: any[]; reported_category?: string } = {}) {

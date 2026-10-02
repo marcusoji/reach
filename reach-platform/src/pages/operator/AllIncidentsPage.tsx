@@ -1,15 +1,18 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { FilterPills } from '../../components/common/FilterPills';
 import { IncidentCard } from '../../components/incidents/IncidentCard';
 import { Button } from '../../components/common/Button';
 import { useApp } from '../../context/AppContext';
+import { uploadIncidentEvidence } from '../../lib/reachApi';
 
 export const AllIncidentsPage: React.FC = () => {
   const { incidents, assessIncident } = useApp();
   const [filter, setFilter] = useState<string>('all');
   const [assessing, setAssessing] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
+  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const filterOptions = [
     { id: 'all', label: 'All' },
@@ -34,6 +37,22 @@ export const AllIncidentsPage: React.FC = () => {
         ? { id, text: `Assessment recorded: ${result.category} · ${Number(result.confidence || 0).toFixed(1)}% · ${result.decision}${result.abstain ? ' (abstained)' : ''}` }
         : { id, text: 'Assessment could not be recorded. The backend may be unavailable.' },
     );
+  };
+
+  // Captured media is the strongest evidence the engine accepts, so it is worth attaching before
+  // running an assessment. The upload must sit under the caller's own uid prefix (server-enforced).
+  const attachFile = async (id: string, file: File) => {
+    setUploading(id);
+    setNotice(null);
+    const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : file.type.startsWith('video/') ? 'video' : 'sensor';
+    try {
+      await uploadIncidentEvidence(id, kind, file);
+      setNotice({ id, text: `Captured ${kind} attached (${file.name}). Re-run the assessment to fuse it.` });
+    } catch (error) {
+      setNotice({ id, text: `Evidence upload failed: ${error instanceof Error ? error.message : 'unknown error'}` });
+    } finally {
+      setUploading(null);
+    }
   };
 
   return (
@@ -63,13 +82,33 @@ export const AllIncidentsPage: React.FC = () => {
               <IncidentCard
                 incident={incident}
                 actionSlot={
-                  <Button
-                    variant="outline"
-                    disabled={assessing === incident.id}
-                    onClick={() => void runAssessment(incident.id)}
-                  >
-                    {assessing === incident.id ? 'Assessing…' : 'Run AI assessment'}
-                  </Button>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <input
+                      ref={(el) => { fileInputs.current[incident.id] = el; }}
+                      type="file"
+                      accept="image/*,audio/*,video/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void attachFile(incident.id, file);
+                        e.target.value = '';
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={uploading === incident.id}
+                      onClick={() => fileInputs.current[incident.id]?.click()}
+                    >
+                      {uploading === incident.id ? 'Attaching…' : 'Attach evidence'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={assessing === incident.id}
+                      onClick={() => void runAssessment(incident.id)}
+                    >
+                      {assessing === incident.id ? 'Assessing…' : 'Run AI assessment'}
+                    </Button>
+                  </div>
                 }
               />
               {notice?.id === incident.id && (
