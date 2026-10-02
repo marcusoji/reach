@@ -324,6 +324,29 @@ S('E. Adversarial and malformed inputs');
   const r = assessEvidence({ evidence: [{ id: '1', kind: 'user_report', category: 'fire', confidence: 0.9, quality: 1, source: 'c1', timestamp: new Date(NOW + 5 * M).toISOString() }] });
   ck('future timestamp handled', Number.isFinite(r.confidence) && r.confidence <= 100);
 }
+{
+  // JSON bodies are untyped: a non-numeric quality used to yield Number('abc')=NaN, which
+  // poisoned confidence/margin/strength. That silenced every abstention blocker and produced
+  // decision='recommend' with a NaN fingerprint on unverified evidence.
+  const r = assessEvidence({ evidence: [{ id: '1', kind: 'sensor', category: 'fire', confidence: 0.9, quality: 'abc', source: 's', timestamp: at(1_000) }] });
+  ck('non-numeric quality does not produce NaN confidence', Number.isFinite(r.confidence), `conf=${r.confidence}`);
+  ck('non-numeric quality cannot force recommend', r.decision !== 'recommend' || Number.isFinite(r.confidence), `decision=${r.decision}`);
+  ck('non-numeric quality leaves a finite fingerprint', !/NaN/.test(r.fp_code), r.fp_code);
+  ck('non-numeric quality abstains', r.abstain === true, `conf=${r.confidence}`);
+  const absent = assessEvidence({ evidence: [{ id: '1', kind: 'sensor', category: 'fire', confidence: 0.9, source: 's', timestamp: at(1_000) }] });
+  const invalid = assessEvidence({ evidence: [{ id: '1', kind: 'sensor', category: 'fire', confidence: 0.9, quality: 'abc', source: 's', timestamp: at(1_000) }] });
+  ck('invalid quality scores strictly below absent quality', invalid.confidence < absent.confidence, `${absent.confidence} -> ${invalid.confidence}`);
+  // corroborating_reports is coerced by the handler, but the engine must be safe on its own.
+  const cr = assessEvidence({ evidence: [], corroboratingReports: 'abc' });
+  ck('non-numeric corroboratingReports stays finite', Number.isFinite(cr.confidence), `conf=${cr.confidence}`);
+  // A non-finite model confidence must be ignored, not propagate.
+  const mm = assessEvidence({ evidence: [{ id: '1', kind: 'user_report', category: 'fire', confidence: 0.9, quality: 1, source: 's', timestamp: at(1_000) }], modelAssist: { category: 'fire', confidence: NaN } });
+  ck('NaN model confidence does not poison the result', Number.isFinite(mm.confidence) && mm.model_agreement === 'none', `conf=${mm.confidence} agreement=${mm.model_agreement}`);
+  // Non-array / null-bearing evidence must not throw.
+  let threw = null;
+  try { assessEvidence({ evidence: 'x' }); assessEvidence({ evidence: [null] }); assessEvidence({ evidence: [undefined, { id: '1', kind: 'text', confidence: 0.5, source: 's', timestamp: at(1_000) }] }); } catch (e) { threw = e.message; }
+  ck('non-array and null-bearing evidence never throw', threw === null, threw || '');
+}
 
 // ------------------------------------------------- F: model disagreement
 S('F. Model second-opinion behaviour');

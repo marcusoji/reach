@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
 
   try {
     if (path === '/devices/register' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const deviceId = textValue(body.device_id, 160);
       const publicKey = textValue(body.public_key, 4096);
       if (!deviceId || !publicKey) return json({ error: 'device_id and public_key are required' }, 422);
@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
 
     if (path === '/me' && req.method === 'GET') return json({ data: { ...profile, email: user.email } });
     if (path === '/me' && req.method === 'PATCH') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const patch: Record<string, unknown> = {};
       if (body.full_name !== undefined) patch.full_name = textValue(body.full_name, 160) || profile.full_name;
       if (body.phone !== undefined) patch.phone = textValue(body.phone, 40);
@@ -301,7 +301,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institutions' && req.method === 'POST') {
       if (profile.role !== 'citizen') return json({ error: 'Only an unassigned citizen can create an institution' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const name = textValue(body.name, 160);
       if (!name) return json({ error: 'Institution name is required' }, 422);
       const { data, error } = await supabase.rpc('create_institution_for_current_user', {
@@ -316,7 +316,7 @@ Deno.serve(async (req) => {
 
     if (path === '/invites' && req.method === 'POST') {
       if (profile.role !== 'institution') return json({ error: 'Institution admin role required' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const email = textValue(body.email, 254)?.toLowerCase();
       const role = textValue(body.role, 30);
       if (!email || !email.includes('@')) return json({ error: 'Valid email is required' }, 422);
@@ -329,7 +329,7 @@ Deno.serve(async (req) => {
     }
 
     if (path === '/invites/redeem' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const code = textValue(body.code, 80);
       if (!code) return json({ error: 'Invite code is required' }, 422);
       const { data, error } = await supabase.rpc('redeem_staff_invite', { p_code: code });
@@ -349,7 +349,7 @@ Deno.serve(async (req) => {
     }
 
     if (path === '/incidents' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const idempotencyKey = textValue(req.headers.get('x-idempotency-key') ?? body.idempotency_key, 160) ?? crypto.randomUUID();
       const category = textValue(body.category, 30)?.toLowerCase() ?? 'other';
       const priority = textValue(body.priority, 20)?.toLowerCase() ?? 'high';
@@ -391,7 +391,7 @@ Deno.serve(async (req) => {
       return json({ data: data ?? [] });
     }
     if (path === '/contacts' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const name = textValue(body.name, 120); const phone = textValue(body.phone, 40);
       if (!name || !phone) return json({ error: 'Contact name and phone are required' }, 422);
       const { data, error } = await supabase.from('emergency_contacts').insert({ user_id:user.id,name,phone,relationship:textValue(body.relationship,80),notify_on_incident:body.notify_on_incident !== false }).select('id,name,phone,relationship,notify_on_incident,created_at').single();
@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
     }
     const contactMatch = path.match(/^\/contacts\/([^/]+)$/);
     if (contactMatch && req.method === 'PATCH') {
-      const id = requireUuid(contactMatch[1]); const body = await req.json();
+      const id = requireUuid(contactMatch[1]); const body = await readJsonLimited(req);
       const patch: Record<string, unknown> = {};
       if (body.name !== undefined) patch.name = textValue(body.name,120);
       if (body.phone !== undefined) patch.phone = textValue(body.phone,40);
@@ -420,7 +420,7 @@ Deno.serve(async (req) => {
     const statusMatch = path.match(/^\/incidents\/([^/]+)\/status$/);
     if (statusMatch && req.method === 'PATCH') {
       const id = requireUuid(statusMatch[1]);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const status = textValue(body.status, 30)?.toLowerCase();
       if (!status || !allowedStatuses.has(status)) return json({ error: 'Invalid incident status' }, 422);
       const verificationState = body.verification_state == null ? null : textValue(body.verification_state, 30);
@@ -432,7 +432,7 @@ Deno.serve(async (req) => {
     const assignMatch = path.match(/^\/incidents\/([^/]+)\/assign$/);
     if (assignMatch && req.method === 'POST') {
       const id = requireUuid(assignMatch[1]);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const responderId = requireUuid(textValue(body.responder_id, 64));
       const { data, error } = await supabase.rpc('assign_incident', { p_incident_id: id, p_responder_id: responderId });
       if (error) throw error;
@@ -440,23 +440,21 @@ Deno.serve(async (req) => {
     }
 
     if (path === '/relay/packets' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const svc = requireService();
       const verdict = await verifyRelayBody(body, {
         actorInstitutionId: profile.institution_id ?? null,
         dedup: {
-          // Gateway dedup: packet_key + packet_hash (multi-path safe: BLE/Wi-Fi/PWA)
+          // Gateway dedup: packet_key + packet_hash (multi-path safe: BLE/Wi-Fi/PWA).
+          // A single atomic upsert; a read-then-write lost receive_count updates and raised
+          // duplicate-key errors when the same packet arrived over several transports at once.
           async record(packetKey, packetHash, institutionId) {
-            const prior = await svc.from('relay_ingest_dedup').select('receive_count').eq('packet_key', packetKey).eq('packet_hash', packetHash).maybeSingle();
-            if (prior.data) {
-              await svc.from('relay_ingest_dedup').update({
-                receive_count: (prior.data.receive_count || 1) + 1,
-                last_seen_at: new Date().toISOString(),
-              }).eq('packet_key', packetKey).eq('packet_hash', packetHash);
-              // Still continue to the ingest path - SQL incident create must stay idempotent by fingerprint
-            } else {
-              await svc.from('relay_ingest_dedup').insert({ packet_key: packetKey, packet_hash: packetHash, institution_id: institutionId });
-            }
+            const { error } = await svc.rpc('record_relay_ingest_dedup', {
+              p_packet_key: packetKey,
+              p_packet_hash: packetHash,
+              p_institution_id: institutionId,
+            });
+            if (error) throw error;
           },
         },
       });
@@ -481,7 +479,7 @@ Deno.serve(async (req) => {
       return json({ data: data ?? [] });
     }
     if (path === '/responders' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const userId = requireUuid(textValue(body.user_id,64));
       const responderType = textValue(body.responder_type,40) || 'staff';
       const { data, error } = await supabase.rpc('add_responder', { p_user_id:userId, p_responder_type:responderType });
@@ -489,7 +487,7 @@ Deno.serve(async (req) => {
       return json({ data },201);
     }
     if (path === '/responders/me/status' && req.method === 'PATCH') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const status = textValue(body.status,20);
       const { data, error } = await supabase.rpc('set_my_responder_status', { p_status:status });
       if (error) throw error;
@@ -513,7 +511,7 @@ Deno.serve(async (req) => {
     const taskStatusMatch = path.match(/^\/tasks\/([^/]+)\/status$/);
     if (taskStatusMatch && req.method === 'PATCH') {
       const id = requireUuid(taskStatusMatch[1]);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const status = textValue(body.status, 30);
       if (!status) return json({ error: 'Task status is required' }, 422);
       const { data, error } = await supabase.rpc('transition_assignment', { p_assignment_id: id, p_status: status });
@@ -555,7 +553,7 @@ Deno.serve(async (req) => {
     if (path === '/institution/billing/bmoni/user' && req.method === 'POST') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
       if (!bmoniConfigured()) return json({ error: 'BMONI is not configured on the server' }, 503);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const firstName = textValue(body.first_name, 80);
       const lastName = textValue(body.last_name, 80);
       const email = textValue(body.email, 254)?.toLowerCase();
@@ -583,7 +581,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institution/billing/bmoni/owner-proof-challenge' && req.method === 'POST') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const walletAddress = textValue(body.wallet_address, 120);
       if (!walletAddress) return json({ error: 'Wallet address is required' }, 422);
       const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
@@ -594,7 +592,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institution/billing/bmoni/wallet' && req.method === 'POST') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const walletAddress = textValue(body.wallet_address, 120);
       const challengeId = textValue(body.owner_proof_challenge_id, 200);
       const signature = textValue(body.owner_proof_signature, 300);
@@ -615,7 +613,7 @@ Deno.serve(async (req) => {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
       const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id) return json({ error: 'Create the institution BMONI payer account first' }, 409);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const personalInfo = body.personalInfo;
       const addressDetails = body.addressDetails;
       if (!personalInfo || !addressDetails) return json({ error: 'personalInfo and addressDetails are required' }, 422);
@@ -625,7 +623,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institution/billing/bmoni/start-nigeria' && req.method === 'POST') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const bvn = textValue(body.bvn, 20);
       if (!bvn || !/^\d{11}$/.test(bvn)) return json({ error: 'A valid 11-digit BVN is required' }, 422);
       const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,wallet_address').eq('institution_id', profile.institution_id).single();
@@ -655,7 +653,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institution/billing/bmoni/payment/proposal' && req.method === 'POST') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const amount = Deno.env.get('REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN')?.trim() || '';
       const treasuryAddress = Deno.env.get('REACH_BMONI_TREASURY_ADDRESS')?.trim() || '';
       const idempotencyKey = textValue(req.headers.get('x-idempotency-key') || body.idempotency_key, 160);
@@ -706,7 +704,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institution/billing/bmoni/payment/sign' && req.method === 'POST') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const proposalId = textValue(body.proposal_id, 200);
       const signature = textValue(body.signature, 300);
       if (!proposalId || !signature) return json({ error: 'proposal_id and signature are required' }, 422);
@@ -754,7 +752,7 @@ Deno.serve(async (req) => {
     }
 
     if (path === '/ai/assess' && req.method === 'POST') {
-      const body = await req.json();
+      const body = await readJsonLimited(req);
       const incidentId = requireUuid(textValue(body.incident_id, 64));
       // Authorize the incident BEFORE calling any external AI provider.
       const { data: incidentForAi, error: incidentForAiError } = await supabase.from('incidents').select('id,category,institution_id,reporter_id').eq('id', incidentId).single();

@@ -32,13 +32,57 @@ object DeviceIdentity {
     // The signed payload omits x: x is defined as sha256 of this string, so including x
     // would make the hash self-referential. The fingerprint still binds every other field,
     // and the ECDSA signature over this string binds x.
+    //
+    // Values are encoded with canonicalValue, not org.json's own serialisation: the shared
+    // format is `key=${JS value}`, where a scalar is String(v) (a raw string, unquoted) and a
+    // container is JSON.stringify(v). org.json escapes "/" as "\/" (and, on older AOSP, C1
+    // controls as \uXXXX) while JSON.stringify emits a bare "/", so nested payloads — and any
+    // base64 device id/key/signature or URL containing "/" — produced a different canonical
+    // string and failed every cross-language signature/fingerprint check.
     fun canonicalSource(packet:org.json.JSONObject):String = listOf(
         "v","k","e","m","incident_id","source_device_id","minimal_payload"
-    ).joinToString("&") { key -> "$key=${packet.opt(key)}" }
+    ).joinToString("&") { key -> "$key=${canonicalValue(packet.opt(key))}" }
 
     fun canonicalRelay(packet:org.json.JSONObject):String = listOf(
         "v","k","e","h","m","incident_id","source_device_id","x","relay_device_id","minimal_payload"
-    ).joinToString("&") { key -> "$key=${packet.opt(key)}" }
+    ).joinToString("&") { key -> "$key=${canonicalValue(packet.opt(key))}" }
+
+    /** Matches the JS `cv` helper: containers are JSON.stringify'd, scalars are String(v). */
+    internal fun canonicalValue(v:Any?):String = when(v){
+        is org.json.JSONObject -> jsJson(v)
+        is org.json.JSONArray -> jsJson(v)
+        null -> "null"
+        else -> v.toString()
+    }
+
+    /** Encode a JSON value exactly as V8's JSON.stringify does. */
+    internal fun jsJson(v:Any?):String = when(v){
+        null, org.json.JSONObject.NULL -> "null"
+        is org.json.JSONObject -> v.keys().asSequence().joinToString(",","{","}"){ k -> "${jsString(k)}:${jsJson(v.opt(k))}" }
+        is org.json.JSONArray -> (0 until v.length()).joinToString(",","[","]"){ i -> jsJson(v.opt(i)) }
+        is String -> jsString(v)
+        is Boolean -> v.toString()
+        is Double -> if(v.isFinite()&&v==Math.floor(v)&&Math.abs(v)<1e15)v.toLong().toString() else v.toString()
+        is Number -> v.toString()
+        else -> jsString(v.toString())
+    }
+
+    /** JSON string escaping as V8 does it: no "/" escaping, raw non-ASCII, \uXXXX for <0x20. */
+    private fun jsString(s:String):String{
+        val sb=StringBuilder(s.length+2); sb.append('"')
+        for(ch in s) when{
+            ch=='"' -> sb.append("\\\"")
+            ch=='\\' -> sb.append("\\\\")
+            ch=='\b' -> sb.append("\\b")
+            ch=='\u000C' -> sb.append("\\f")
+            ch=='\n' -> sb.append("\\n")
+            ch=='\r' -> sb.append("\\r")
+            ch=='\t' -> sb.append("\\t")
+            ch<' ' -> sb.append("\\u%04x".format(ch.code))
+            else -> sb.append(ch)
+        }
+        sb.append('"'); return sb.toString()
+    }
 
     fun signSourcePacket(packet:org.json.JSONObject):org.json.JSONObject {
         packet.put("source_device_id",deviceId()); packet.put("source_public_key",publicKeyB64())

@@ -1,0 +1,37 @@
+{
+  "plain": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"fire\",\"priority\":\"high\",\"title\":\"Fire\",\"description\":\"smoke\",\"location_label\":null,\"location_accuracy_m\":null,\"latitude\":null,\"longitude\":null,\"created_at\":1700000000000},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"fire\",\"priority\":\"high\",\"title\":\"Fire\",\"description\":\"smoke\",\"location_label\":null,\"location_accuracy_m\":null,\"latitude\":null,\"longitude\":null,\"created_at\":1700000000000}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"fire\",\"priority\":\"high\",\"title\":\"Fire\",\"description\":\"smoke\",\"location_label\":null,\"location_accuracy_m\":null,\"latitude\":null,\"longitude\":null,\"created_at\":1700000000000}"
+  },
+  "unicode": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"fire\",\"title\":\"Incendie 🔥\",\"description\":\"ligne1\\nligne2\\tTab\",\"location_label\":\"Rue de l’Église\"},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"fire\",\"title\":\"Incendie 🔥\",\"description\":\"ligne1\\nligne2\\tTab\",\"location_label\":\"Rue de l’Église\"}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"fire\",\"title\":\"Incendie 🔥\",\"description\":\"ligne1\\nligne2\\tTab\",\"location_label\":\"Rue de l’Église\"}"
+  },
+  "quotes": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"other\",\"title\":\"He said \\\"help\\\"\",\"description\":\"back\\\\slash and /slash\"},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"other\",\"title\":\"He said \\\"help\\\"\",\"description\":\"back\\\\slash and /slash\"}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"other\",\"title\":\"He said \\\"help\\\"\",\"description\":\"back\\\\slash and /slash\"}"
+  },
+  "slash_only": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"other\",\"title\":\"see http://x/y\",\"description\":\"a/b/c\"},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"other\",\"title\":\"see http://x/y\",\"description\":\"a/b/c\"}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"other\",\"title\":\"see http://x/y\",\"description\":\"a/b/c\"}"
+  },
+  "c1_controls": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"medical\",\"title\":\"range  end\",\"description\":\"soft­hyphen\"},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"medical\",\"title\":\"range  end\",\"description\":\"soft­hyphen\"}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"medical\",\"title\":\"range  end\",\"description\":\"soft­hyphen\"}"
+  },
+  "emoji_pair": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"fire\",\"title\":\"👩‍🚒 team\",\"description\":\"🏠🏚️\"},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"fire\",\"title\":\"👩‍🚒 team\",\"description\":\"🏠🏚️\"}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"fire\",\"title\":\"👩‍🚒 team\",\"description\":\"🏠🏚️\"}"
+  },
+  "floats": {
+    "packetJson": "{\"v\":2,\"k\":\"pkt-abcdef01\",\"incident_id\":null,\"e\":1800000000000,\"h\":0,\"m\":6,\"source_device_id\":\"dev123\",\"minimal_payload\":{\"category\":\"other\",\"latitude\":48.8584,\"longitude\":2.2945,\"location_accuracy_m\":12.5},\"x\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "sourceCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&m=6&incident_id=null&source_device_id=dev123&minimal_payload={\"category\":\"other\",\"latitude\":48.8584,\"longitude\":2.2945,\"location_accuracy_m\":12.5}",
+    "relayCanonical": "v=2&k=pkt-abcdef01&e=1800000000000&h=0&m=6&incident_id=null&source_device_id=dev123&x=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&relay_device_id=relaydev&minimal_payload={\"category\":\"other\",\"latitude\":48.8584,\"longitude\":2.2945,\"location_accuracy_m\":12.5}"
+  }
+}

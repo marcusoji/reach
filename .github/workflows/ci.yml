@@ -81,6 +81,13 @@ jobs:
           PGPORT: '5432'
           PGUSER: postgres
           PGPASSWORD: postgres
+      - name: Relay ingest + dedup concurrency simulation
+        run: npm run test:relay-sim
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
 
   android:
     runs-on: ubuntu-latest

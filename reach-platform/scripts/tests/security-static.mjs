@@ -30,6 +30,9 @@ check('Bootstrap key blocked after first operator', api.includes('zero operators
 check('Webhook official signature header', /x-webhook-signature/i.test(api));
 check('Rate limit uses IP+user', api.includes('x-forwarded-for') || api.includes('clientIp'));
 check('JSON body size limit', api.includes('MAX_JSON_BODY') || api.includes('readJsonLimited'));
+// The check above passes if ANY handler is bounded. In fact every JSON body must go through the
+// size-limited reader; a single raw `req.json()` re-opens the unbounded-body hole for that route.
+check('Every JSON body is read through the size-limited reader', !/req\.json\(\)/.test(api));
 check('Demo mode explicit flag', reachApi.includes('VITE_REACH_DEMO_MODE'));
 check('Session storage hardened', reachApi.includes('sessionStorage'));
 check('CSP on Vercel', /Content-Security-Policy/i.test(vercel));

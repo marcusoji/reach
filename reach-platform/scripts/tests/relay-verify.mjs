@@ -329,6 +329,31 @@ S('J. Cross-language canonical key order (Kotlin relay node)');
 }
 
 // =====================================================================
+S('K. Cross-language canonical value fidelity (slash / emoji / control chars)');
+{
+  // Key ORDER matching is not enough: the encoder must also agree on VALUE serialisation.
+  // Android's org.json escapes "/" as "\/" and (older AOSP) C1 controls as \uXXXX, while
+  // JSON.stringify emits a bare "/". Base64 device ids/keys/signatures and any URL or path
+  // contain "/", so a value-level divergence silently breaks every cross-language signature
+  // check. The fixture is committed and consumed by the Kotlin CrossLanguageCanonicalTest;
+  // here we assert it is still exactly what relay_protocol.ts produces today.
+  const { buildFixture } = await import(pathToFileURL(path.join(HERE, 'cross-fixtures.mjs')).href);
+  const expected = buildFixture();
+  const fixturePath = path.join(HERE, '..', '..', '..', 'relay-node-android', 'app', 'src', 'test', 'resources', 'cross_cases.json');
+  const committed = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  ck('committed cross-language fixture is fresh (regenerate with cross-fixtures.mjs)',
+    JSON.stringify(committed) === JSON.stringify(expected));
+  // Spot-check the exact divergence that motivated this guard.
+  ck('server canonical does not escape "/" (JSON.stringify semantics)',
+    expected.slash_only.sourceCanonical.includes('http://x/y') && !expected.slash_only.sourceCanonical.includes('\\/'),
+    expected.slash_only.sourceCanonical.slice(-60));
+  ck('server canonical leaves non-ASCII raw (emoji preserved)',
+    expected.emoji_pair.sourceCanonical.includes('👩‍🚒'));
+  ck('server canonical escapes C1-range controls with JSON.stringify semantics',
+    expected.c1_controls.sourceCanonical.includes('range \u007f\u0080\u009f end'));
+}
+
+// =====================================================================
 console.log('\n' + '='.repeat(64));
 console.log(`TOTAL: ${pass}/${pass + fail} passed`);
 console.log('='.repeat(64));
