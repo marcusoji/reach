@@ -133,3 +133,17 @@ if (rlsOff) {
   process.exit(1);
 }
 console.log('PASS - row level security enabled on every public table; privileged RPCs are not anon-callable.');
+
+// Tenant-isolation suite (tests/rls_tenant_isolation.sql). It asserts, as the `authenticated`
+// role, that RLS actually isolates institutions and that the privilege/audit protections hold.
+// Running it here means a policy regression fails CI alongside the migration that caused it.
+const rlsSuite = join(here, '..', '..', '..', 'tests', 'rls_tenant_isolation.sql');
+const rls = psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '-f', rlsSuite]);
+if (rls.status !== 0) {
+  const err = (rls.stderr || '').split('\n').find((l) => /ERROR/i.test(l)) || rls.stderr.trim();
+  console.error('FAIL - tenant isolation suite failed.');
+  console.error(`  ${err.trim()}`);
+  process.exit(1);
+}
+const passed = (rls.stdout.match(/^PASS \d+/gm) || []).length;
+console.log(`PASS - tenant isolation suite: ${passed} assertions held (role escalation, cross-institution reads/writes, audit immutability, anon access).`);

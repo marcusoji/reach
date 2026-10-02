@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +39,17 @@ for (const file of jsFiles) execFileSync(process.execPath,['--check',join(pwa,'j
 const pwaHtml = readFileSync(join(pwa,'index.html'),'utf8');
 if (/value="(?:Amaka Okafor|amaka@example.com|reachdemo123)"/i.test(pwaHtml)) throw new Error('PWA contains demo credentials as form values');
 if (!readFileSync(join(pwa,'js','backend.js'),'utf8').includes('indexedDB')) throw new Error('Offline queue implementation missing');
+// The PWA is offline-first, so sw.js must precache every module the app imports. A module
+// reachable only over the network makes a cold offline start fail with a module-load error.
+const sw = readFileSync(join(pwa,'sw.js'),'utf8');
+const walkJs = (dir) => readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walkJs(join(dir,e.name)):[join(dir,e.name)]);
+const imported = new Set();
+for (const file of walkJs(join(pwa,'js')).filter(f=>f.endsWith('.js'))) {
+  for (const m of readFileSync(file,'utf8').matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+    imported.add('./' + relative(pwa, join(dirname(file), m[1])).split(sep).join('/'));
+  }
+}
+for (const mod of imported) if (!sw.includes(mod)) throw new Error(`Service worker does not precache imported module: ${mod}`);
 if (!hardening.includes('revoke all on function public.promote_current_user_to_operator() from authenticated')) throw new Error('Operator privilege RPC is still browser-callable');
 if (!hardening.includes('ingest_relay_packet_service')) throw new Error('Trusted relay ingestion function missing');
 if (!api.includes('const serviceRoleKey =')) throw new Error('Privileged service path must fail closed');

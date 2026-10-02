@@ -52,7 +52,7 @@ commit;
 -- filtering. Reproduce that here so a "permission denied" never masks an RLS gap:
 -- the assertions below must fail on policy, not on a missing grant.
 grant usage on schema public to anon, authenticated, service_role;
-grant select on all tables in schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
 
 -- ---- assertions -----------------------------------------------------------
 \echo '=== REACH RLS isolation suite ==='

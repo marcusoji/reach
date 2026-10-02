@@ -4,7 +4,7 @@
 - `reach-platform/` — React operations app + Supabase Edge API
 - `reach-citizen-pwa/` — Citizen emergency PWA (offline queue)
 - `relay-node-android/` — Native BLE + Wi-Fi Direct relay with ACK
-- `reach-platform/supabase/` — Migrations `0001`–`0010` + Edge functions
+- `reach-platform/supabase/` — Migrations `0001`–`0011` + Edge functions
 - `docs/` — **All product documentation** (start at `docs/README.md`)
 - `tests/` — RLS, BMONI, load, AI harnesses
 - `.github/workflows/ci.yml` — CI gates

@@ -28,7 +28,7 @@
 - AI is advisory Safety Fusion Confidence until calibration dataset exists
 
 ## Production checklist (must all be green)
-- [ ] Migrations 0001–0010 on production
+- [ ] Migrations 0001–0011 on production
 - [ ] `VITE_REACH_DEMO_MODE=false`
 - [ ] Secrets: BMONI_*, REACH_ALLOWED_ORIGINS, no star CORS
 - [ ] Super-admin bootstrap then invitations only

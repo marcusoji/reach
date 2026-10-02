@@ -4,7 +4,7 @@
 
 - `reach-platform/` — React + Vite + TypeScript operations platform (4 roles: security-desk, staff, institution, operator).
 - `reach-citizen-pwa/` — vanilla-JS citizen emergency PWA (no build step).
-- `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0010`) and the `api` Edge Function (`functions/api/`).
+- `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0011`) and the `api` Edge Function (`functions/api/`).
 - `relay-node-android/` — native Android relay (Kotlin). `bmoni-institution-mobile/` — Flutter BMONI signing service.
 - `docs/` — **all** product documentation; start at `docs/README.md`. Keep the root free of loose notes: only `README.md` and `AGENTS.md` live there. Merge new fix logs into `docs/HARDENING_LOG.md` and release notes into `docs/RELEASE_NOTES.md` rather than adding another root `*_FIXES.md`.
 - `tests/` — RLS, BMONI webhook, load (k6) and AI-calibration harnesses.
@@ -108,3 +108,9 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   (`packet.e`), backs off exponentially and dead-letters after 8 attempts, and refuses to queue past
   50 live rows. It previously retried every 30s forever with no expiry. `scripts/tests/pwa-relay-queue.mjs`
   drives the real queue under a minimal in-memory IndexedDB and is in CI via `npm run test:pwa-relay`.
+- `reach-citizen-pwa/sw.js` must precache every module the app imports. `validate.mjs` walks the import
+  graph and fails if an imported module is missing from the `ASSETS` list, so adding a new relay/JS
+  module means adding it there too. A network-only module breaks the cold offline start.
+- `tests/rls_tenant_isolation.sql` runs inside `npm run validate:migrations` (and therefore CI), so a
+  policy regression fails alongside the migration that caused it. The suite grants full DML to
+  `authenticated` before asserting, so a failure reflects RLS/policy, not a missing table grant.

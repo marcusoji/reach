@@ -23,7 +23,7 @@ VITE_REACH_API_URL=https://YOUR_PROJECT.supabase.co/functions/v1/api
 ```
 
 ## 2. Migrations
-Apply in order: `0001` → `0010` (see `reach-platform/supabase/migrations/`).
+Apply in order: `0001` → `0011` (see `reach-platform/supabase/migrations/`).
 
 ```bash
 supabase db push
