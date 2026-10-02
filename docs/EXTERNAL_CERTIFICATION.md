@@ -19,7 +19,7 @@ errors merely to obtain a green build.
 
 ## 2. Supabase
 
-Create a fresh staging project and apply migrations `0001`–`0012` in order.
+Create a fresh staging project and apply migrations `0001`–`0018` in order.
 Execute an RLS/tenant-isolation regression suite for every role (citizen,
 institution, security-desk, staff, operator, unauthenticated). Test
 cross-institution attempts for incidents, evidence, responders, members,

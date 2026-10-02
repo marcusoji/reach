@@ -1,7 +1,7 @@
 # REACH Production Status
 
 **Package:** REACH-PHASE4-CERT-READY (Phases 1–4)  
-**Migrations:** 0001–0012  
+**Migrations:** 0001–0018  
 **Last updated:** 2026-10-01  
 
 This is the **authoritative** status document. Older audit/fix/next-fix notes
@@ -9,7 +9,7 @@ have been consolidated into [HARDENING_LOG.md](./HARDENING_LOG.md) and
 [RELEASE_NOTES.md](./RELEASE_NOTES.md).
 
 ## What this package is
-Integrated MVP: `reach-platform` (React), `reach-citizen-pwa`, `relay-node-android`, Supabase migrations `0001`–`0012`.
+Integrated MVP: `reach-platform` (React), `reach-citizen-pwa`, `relay-node-android`, Supabase migrations `0001`–`0018`.
 
 ## Phase 1 implemented in this build
 
