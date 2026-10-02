@@ -44,7 +44,14 @@ export const AllIncidentsPage: React.FC = () => {
   const attachFile = async (id: string, file: File) => {
     setUploading(id);
     setNotice(null);
-    const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : file.type.startsWith('video/') ? 'video' : 'sensor';
+    // Only media kinds are accepted from a client. sensor/motion are not something an operator can
+    // assert on a citizen's behalf, so an unrelated file is refused rather than mislabelled.
+    const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : file.type.startsWith('video/') ? 'video' : null;
+    if (!kind) {
+      setNotice({ id, text: `Unsupported file type (${file.type || 'unknown'}). Attach a photo, audio or video file.` });
+      setUploading(null);
+      return;
+    }
     try {
       await uploadIncidentEvidence(id, kind, file);
       setNotice({ id, text: `Captured ${kind} attached (${file.name}). Re-run the assessment to fuse it.` });

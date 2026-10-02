@@ -334,4 +334,102 @@ begin
 end $$;
 \echo 'PASS 14 - evidence objects are scoped to the uploader''s prefix'
 
+-- 15) A strong kind must be contingent on a real uploaded object. Before 0018 a caller could claim
+--     `image` with no storage path at all and collect the 0.72 weight.
+do $$
+declare rejected boolean := false;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', true);
+  begin
+    perform public.attach_incident_evidence(
+      (select id from incidents where institution_id = '11111111-1111-1111-1111-111111111111' limit 1),
+      'image');
+  exception
+    when others then rejected := true;
+  end;
+  reset role;
+  if not rejected then
+    raise exception 'FAIL 15: image evidence accepted with no uploaded object';
+  end if;
+end $$;
+\echo 'PASS 15 - strong kinds require an uploaded object'
+
+-- 16) A path outside the caller's own uid prefix must be refused even if the object exists.
+do $$
+declare rejected boolean := false;
+begin
+  insert into storage.objects (bucket_id, name, owner, metadata)
+  values ('incident-evidence', 'aaaaaaaa-0000-0000-0000-000000000002/photo.jpg',
+          'aaaaaaaa-0000-0000-0000-000000000002', '{"mimetype":"image/jpeg"}');
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', true);
+  begin
+    perform public.attach_incident_evidence(
+      (select id from incidents where institution_id = '11111111-1111-1111-1111-111111111111' limit 1),
+      'image', 'aaaaaaaa-0000-0000-0000-000000000002/photo.jpg', repeat('a', 64));
+  exception
+    when others then rejected := true;
+  end;
+  reset role;
+  if not rejected then
+    raise exception 'FAIL 16: evidence attached from another user''s storage prefix';
+  end if;
+end $$;
+\echo 'PASS 16 - evidence cannot reference another user''s object'
+
+-- 17) The recorded content type must match the claimed kind, so a non-image cannot be presented
+--     as captured image evidence.
+do $$
+declare rejected boolean := false;
+begin
+  insert into storage.objects (bucket_id, name, owner, metadata)
+  values ('incident-evidence', 'aaaaaaaa-0000-0000-0000-000000000001/notes.txt',
+          'aaaaaaaa-0000-0000-0000-000000000001', '{"mimetype":"text/plain"}');
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', true);
+  begin
+    perform public.attach_incident_evidence(
+      (select id from incidents where institution_id = '11111111-1111-1111-1111-111111111111' limit 1),
+      'image', 'aaaaaaaa-0000-0000-0000-000000000001/notes.txt', repeat('b', 64));
+  exception
+    when others then rejected := true;
+  end;
+  reset role;
+  if not rejected then
+    raise exception 'FAIL 17: a text object was accepted as image evidence';
+  end if;
+end $$;
+\echo 'PASS 17 - claimed kind must match the uploaded object''s content type'
+
+-- 18) The happy path must actually work, and the weight must be the server's (72 for image), not
+--     anything the caller supplied.
+do $$
+declare created public.incident_evidence;
+begin
+  insert into storage.objects (bucket_id, name, owner, metadata)
+  values ('incident-evidence', 'aaaaaaaa-0000-0000-0000-000000000001/scene.jpg',
+          'aaaaaaaa-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg"}');
+
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', true);
+  select * into created from public.attach_incident_evidence(
+    (select id from incidents where institution_id = '11111111-1111-1111-1111-111111111111' limit 1),
+    'image', 'aaaaaaaa-0000-0000-0000-000000000001/scene.jpg', repeat('c', 64));
+  reset role;
+
+  if created.id is null then
+    raise exception 'FAIL 18: a valid capture was not attached';
+  end if;
+  if created.confidence <> 72 then
+    raise exception 'FAIL 18: image confidence was % not the server-derived 72', created.confidence;
+  end if;
+  if created.metadata->>'captured' is distinct from 'true' then
+    raise exception 'FAIL 18: captured evidence is not marked as captured';
+  end if;
+end $$;
+\echo 'PASS 18 - a valid capture attaches with the server-derived weight'
+
 \echo '=== RLS isolation suite complete ==='

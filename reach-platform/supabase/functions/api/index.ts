@@ -893,7 +893,9 @@ Deno.serve(async (req) => {
       const body = await readJsonLimited(req);
       const incidentId = requireUuid(textValue(body.incident_id, 64));
       const kind = textValue(body.kind, 20);
-      const captureKinds = ['image', 'audio', 'video', 'sensor', 'motion', 'text', 'location'];
+      // Mirrors the RPC's allowed set. sensor/motion are deliberately absent: they describe device
+      // integrations a citizen client cannot perform, and stay reachable only via the derived path.
+      const captureKinds = ['image', 'audio', 'video', 'text', 'location'];
       if (!kind || !captureKinds.includes(kind)) return json({ error: 'Unsupported evidence kind' }, 400);
       const storagePath = textValue(body.storage_path, 512);
       // metadata is untrusted client input; bound it and keep it an object so it cannot replace the

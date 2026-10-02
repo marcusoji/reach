@@ -342,9 +342,24 @@ Captured media now flows through the private `incident-evidence` bucket:
 
 Two deliberate limits. The client never sends a confidence, so a caller cannot award itself the
 strong-kind weights; and `corroboration` is not an accepted capture kind, because it has to mean
-independent corroboration rather than a flag a client sets on itself. The effect on a real
-incident is visible: derived evidence alone abstains at ~51%, one captured image takes it to
-~69% and a `recommend` decision.
+independent corroboration rather than a flag a client sets on itself. `sensor` and `motion` are
+excluded for the same reason: no citizen client can produce them, so they stay reachable only
+through the service-role derived path.
+
+Migration `0018` closes a hole left by `0017`: `storage_path` was optional for every kind, so a
+client could claim `image` and collect the strongest fusion weight (0.9) with no upload at all.
+A media kind now requires a storage path, a content hash, and an uploaded object whose recorded
+content type matches the claimed kind, and an incident accepts at most 20 evidence rows.
+
+The citizen PWA captures on the review screen and uploads through the same path. A capture taken
+before the alert is sent has no incident to attach to, so it is held on the device and bound at
+send time — to the incident id when the gateway accepted the report, or to the queued report's
+idempotency key and rebound when the queue flushes.
+
+The effect on a real incident is visible: derived evidence alone abstains at ~45% for a sparse
+report (~54% with a description), while one captured image takes it to ~64-72% and a `recommend`
+decision. The exact figures drift with the report's age, so the test pins the claim rather than the
+decimals.
 
 ## 8. Follow-ups for Launchverse
 

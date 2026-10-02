@@ -185,7 +185,7 @@
               <div class="ico">
                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 2.8V15a3 3 0 0 0 3 3h.5M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 2.8V15a3 3 0 0 1-3 3h-.5M9 18v1a3 3 0 0 0 6 0v-1"/><circle cx="12" cy="9" r="1"/></svg>
               </div>
-              <div class="txt"><b>AI noticed unusual motion</b><span>Review evidence — 2 signals detected</span></div>
+              <div class="txt"><b>Add evidence to your report</b><span>Photo, audio or video — fused by REACH</span></div>
               <svg class="chev" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
             </button>
             <div class="quick-row">
@@ -196,29 +196,32 @@
           </section>
 
           <!-- =============================================================
-               SCREEN 6: AI Detection & Evidence Review
+               SCREEN 6: Evidence capture & review
                ============================================================= -->
           <section class="screen-view" id="screen-aidetect" data-screen="aidetect">
             <div class="app-header">
               <button class="back-btn" data-nav="home" aria-label="Back">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
               </button>
-              <h2>AI evidence review</h2>
+              <h2>Evidence review</h2>
             </div>
             <div class="pad">
+              <input id="reviewCamera" type="file" accept="image/*" capture="environment" style="display:none;">
+              <input id="reviewAudio" type="file" accept="audio/*" capture="user" style="display:none;">
+              <input id="reviewVideo" type="file" accept="video/*" capture="environment" style="display:none;">
               <div class="ai-tag" style="margin-bottom:4px;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 2.8V15a3 3 0 0 0 3 3h.5M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 2.8V15a3 3 0 0 1-3 3h-.5M9 18v1a3 3 0 0 0 6 0v-1"/><circle cx="12" cy="9" r="1"/></svg>AI PERCEPTION
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 2.8V15a3 3 0 0 0 3 3h.5M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 2.8V15a3 3 0 0 1-3 3h-.5M9 18v1a3 3 0 0 0 6 0v-1"/><circle cx="12" cy="9" r="1"/></svg>CAPTURED EVIDENCE
               </div>
+              <p style="font-size:0.75rem; color:var(--reach-text-secondary); margin:0 0 10px;">
+                Add what you can see or hear. REACH fuses it with your report; a responder still
+                reviews everything before anyone is dispatched.
+              </p>
               <div class="sense-row" id="senseRow">
-                <div class="sense-chip" id="senseMotion"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg><span>Motion</span></div>
-                <div class="sense-chip" id="senseVisual"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>Visual</span></div>
-                <div class="sense-chip" id="senseAudio"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3a4 4 0 0 0-4 4v5a4 4 0 0 0 8 0V7a4 4 0 0 0-4-4z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Audio</span></div>
+                <div class="sense-chip" id="senseVisual" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>Photo</span></div>
+                <div class="sense-chip" id="senseAudio" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3a4 4 0 0 0-4 4v5a4 4 0 0 0 8 0V7a4 4 0 0 0-4-4z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Audio</span></div>
+                <div class="sense-chip" id="senseVideo" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg><span>Video</span></div>
               </div>
               <div class="fusion-list" id="fusionList"></div>
-              <div id="gaugeWrap" style="display:none;">
-                <div class="ai-gauge-top"><span class="l">Fused confidence</span><span class="p" id="gaugePct">0%</span></div>
-                <div class="ai-gauge-bar"><div class="ai-gauge-fill" id="gaugeFill"></div></div>
-              </div>
               <div id="aiConfirmSlot"></div>
             </div>
           </section>
@@ -320,23 +323,29 @@
                 <div class="confirm-row"><span>Confidence</span><span>Assessment pending</span></div>
                 <div class="confirm-row"><span>Network</span><span id="confirmNetwork">Checking…</span></div>
               </div>
-              <div class="evidence-mini" style="margin-top:16px;">
-                <div class="evidence-mini-row">
-                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
-                  <div><b>Motion spike</b><span>Detected on-device</span></div>
-                </div>
-                <div class="evidence-mini-row">
-                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                  <div><b>Visual smoke match</b><span>smoke-vision-v1.2</span></div>
-                </div>
+              <div class="evidence-mini" id="captureList" style="margin-top:16px;">
                 <div class="evidence-mini-row">
                   <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
                   <div><b>You confirmed it</b><span>Human sign-off recorded</span></div>
                 </div>
               </div>
+              <div class="stack" style="margin-top:16px; gap:10px;">
+                <input id="captureCamera" type="file" accept="image/*" capture="environment" style="display:none;">
+                <input id="captureAudio" type="file" accept="audio/*" capture="user" style="display:none;">
+                <input id="captureGallery" type="file" accept="image/*,audio/*,video/*" style="display:none;">
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                  <button class="btn-ghost" id="capturePhotoBtn" type="button" style="flex:1;">Take photo</button>
+                  <button class="btn-ghost" id="captureAudioBtn" type="button" style="flex:1;">Record audio</button>
+                </div>
+                <button class="btn-text" id="captureGalleryBtn" type="button">Attach a file instead</button>
+                <p id="captureStatus" style="font-size:0.72rem; color:var(--reach-text-secondary); margin:0;">
+                  Captured media is the strongest evidence REACH can fuse. It is uploaded to your own
+                  private folder and attached to this incident — never shared with other citizens.
+                </p>
+              </div>
               <div class="warn-box">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.5 17a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-                <span>If you are offline, REACH saves the alert locally and syncs when a connection or supported relay path becomes available.</span>
+                <span>If you are offline, REACH saves the alert and any captured evidence locally and syncs when a connection or supported relay path becomes available.</span>
               </div>
               <div class="stack">
                 <button class="btn-primary" data-nav="tracking">Send emergency alert</button>

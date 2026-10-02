@@ -141,78 +141,91 @@ function updateStatusBar(config) {
 
 
 /**
- * Handle AI Detection screen sequential evidence simulation
+ * Render the capture list on the evidence review screen.
+ *
+ * Shows what the citizen has actually captured, with the fusion weight the server will assign.
+ * Nothing here is simulated: an empty list means no evidence has been collected, and the screen
+ * says so rather than implying signals were detected.
  */
-function runAiDetectionSequence() {
+async function renderEvidenceReview() {
   const fusionList = $('#fusionList');
-  const gaugeWrap = $('#gaugeWrap');
-  const gaugeFill = $('#gaugeFill');
-  const gaugePct = $('#gaugePct');
   const confirmSlot = $('#aiConfirmSlot');
-  const senseMotion = $('#senseMotion');
-  const senseVisual = $('#senseVisual');
-  const senseAudio = $('#senseAudio');
-
   if (!fusionList) return;
 
-  // Reset visual state
+  const { listEvidenceQueue, CAPTURE_KINDS } = await import('./evidence.js');
+
+  let rows = [];
+  try { rows = await listEvidenceQueue(); } catch { rows = []; }
+
+  const label = { image: 'Photo', audio: 'Audio', video: 'Video' };
+  const weight = { image: 'strong', audio: 'moderate', video: 'moderate' };
+
   fusionList.innerHTML = '';
-  if (confirmSlot) confirmSlot.innerHTML = '';
-  if (gaugeWrap) gaugeWrap.style.display = 'none';
-  if (gaugeFill) gaugeFill.style.width = '0%';
-  if (gaugePct) gaugePct.textContent = '0%';
-  if (senseMotion) senseMotion.classList.remove('on');
-  if (senseVisual) senseVisual.classList.remove('on');
-  if (senseAudio) senseAudio.classList.remove('on');
-
-  function setGauge(v) {
-    if (gaugeFill) gaugeFill.style.width = v + '%';
-    if (gaugePct) gaugePct.textContent = v + '%';
-  }
-
-  function addFusion(title, sub, weak = false) {
+  if (!rows.length) {
     const row = document.createElement('div');
-    row.className = 'fusion-row' + (weak ? ' weak' : '');
-    row.innerHTML = `<div class="fd"></div><div><b>${title}</b><span>${sub}</span></div>`;
+    row.className = 'fusion-row weak';
+    row.innerHTML = '<div class="fd"></div><div><b>No evidence captured yet</b><span>Use Photo, Audio or Video above — you can also attach evidence later</span></div>';
     fusionList.appendChild(row);
+  } else {
+    for (const item of rows) {
+      const row = document.createElement('div');
+      row.className = 'fusion-row';
+      row.innerHTML = `<div class="fd"></div><div><b>${label[item.kind] || item.kind} attached</b><span>${weight[item.kind] || 'moderate'} evidence · held on this device until you send</span></div>`;
+      fusionList.appendChild(row);
+    }
   }
 
-  // Animation sequence steps
-  const sequence = [
-    () => senseMotion && senseMotion.classList.add('on'),
-    () => senseVisual && senseVisual.classList.add('on'),
-    () => senseAudio && senseAudio.classList.add('on'),
-    () => {
-      if (gaugeWrap) gaugeWrap.style.display = 'block';
-      addFusion('Motion evidence', window.REACH_CONFIG?.DEMO_MODE ? 'demo-only simulation' : 'not collected unless an explicit supported sensor integration is enabled');
-      setGauge(window.REACH_CONFIG?.DEMO_MODE ? 38 : 0);
-    },
-    () => {
-      addFusion('Visual evidence', window.REACH_CONFIG?.DEMO_MODE ? 'demo-only simulation' : 'not collected unless the user explicitly enables a supported vision integration');
-      setGauge(window.REACH_CONFIG?.DEMO_MODE ? 69 : 0);
-    },
-    () => {
-      addFusion('Audio evidence', window.REACH_CONFIG?.DEMO_MODE ? 'demo-only simulation · low weight' : 'not collected unless the user explicitly enables a supported audio integration', true);
-      setGauge(window.REACH_CONFIG?.DEMO_MODE ? 74 : 0);
-    },
-    () => {
-      if (confirmSlot) {
-        confirmSlot.innerHTML = `
-          <div class="ai-confirm-box">
-            <b>Is this emergency real?</b>
-            <p>REACH can assist with evidence when supported integrations are enabled, but never sends an alert without your confirmation. Review the emergency details and confirm.</p>
-          </div>
-          <div class="stack" style="margin-top:14px;">
-            <button class="btn-primary" data-nav="category">Yes, continue</button>
-            <button class="btn-text" data-nav="home">I'm okay, dismiss</button>
-          </div>`;
-      }
-    }
-  ];
+  const kinds = CAPTURE_KINDS;
+  if (confirmSlot) {
+    confirmSlot.innerHTML = `
+      <div class="ai-confirm-box">
+        <b>Evidence is optional</b>
+        <p>REACH fuses whatever you attach with your report, and a responder reviews everything before anyone is dispatched. ${rows.length ? 'Your captures are held on this device until you send the alert.' : 'You can send without any evidence.'}</p>
+      </div>
+      <div class="stack" style="margin-top:14px;">
+        <button class="btn-primary" data-nav="category">Continue</button>
+        <button class="btn-text" data-nav="home">Back to home</button>
+      </div>`;
+  }
 
-  sequence.forEach((stepFn, idx) => {
-    screenTimers.add(stepFn, 400 + idx * 550);
-  });
+  // Chip state reflects what is actually held, not a scripted animation.
+  for (const kind of kinds) {
+    const chip = kind === 'image' ? $('#senseVisual') : kind === 'audio' ? $('#senseAudio') : $('#senseVideo');
+    if (chip) chip.classList.toggle('on', rows.some(r => r.kind === kind));
+  }
+}
+
+/** Queue a capture taken on the review screen. It has no incident yet, so it is bound at send.
+ * Assigning `onchange` rather than adding a listener keeps this idempotent: the screen is entered
+ * more than once, and stacked listeners would queue the same file repeatedly. */
+function captureFromReview(inputId, kind) {
+  const input = $(inputId);
+  if (!input) return;
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const { queueEvidenceCapture } = await import('./evidence.js');
+    await queueEvidenceCapture({ incidentId: null, incidentKey: null, kind, blob: file, mime: file.type, meta: { name: file.name, size: file.size } });
+    await renderEvidenceReview();
+  };
+}
+
+/**
+ * Wire the evidence review screen: capture chips open the right picker, and the list reflects
+ * what is actually held on the device.
+ */
+function runAiDetectionSequence() {
+  const visual = $('#senseVisual');
+  const audio = $('#senseAudio');
+  const video = $('#senseVideo');
+  if (visual) visual.onclick = () => $('#reviewCamera')?.click();
+  if (audio) audio.onclick = () => $('#reviewAudio')?.click();
+  if (video) video.onclick = () => $('#reviewVideo')?.click();
+  captureFromReview('#reviewCamera', 'image');
+  captureFromReview('#reviewAudio', 'audio');
+  captureFromReview('#reviewVideo', 'video');
+  void renderEvidenceReview();
 }
 
 /**

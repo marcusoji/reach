@@ -618,6 +618,34 @@ S('H. Output distribution sanity (not calibration)');
   ck('more strong evidence yields higher confidence', e8 > e0, `${e0} -> ${e8}`);
 }
 
+// ------------------------------------------------- F: captured evidence is what lifts a report
+// The docs claim a derived-only incident abstains while a captured image makes it `recommend`.
+// That claim is only worth making if it stays true, so it is pinned here. The derived set mirrors
+// deriveEvidenceFromIncident in the API handler.
+S('F. Captured evidence raises a derived-only report');
+{
+  const ts = new Date().toISOString();
+  const base = { category: 'fire', timestamp: ts };
+  const sparseDerived = [
+    { kind: 'user_report', confidence: 60, quality: 1, ...base },
+    { kind: 'location', confidence: 40, quality: 1, ...base },
+  ];
+  const completeDerived = [...sparseDerived, { kind: 'text', confidence: 55, quality: 1, ...base }];
+  const image = { kind: 'image', confidence: 72, quality: 1, source: 'capture', ...base };
+
+  const sparse = assessEvidence({ reportedCategory: 'fire', userConfirmed: false, evidence: sparseDerived });
+  ck('a derived-only report abstains', sparse.abstain === true, `confidence=${sparse.confidence}`);
+  ck('the derived-only decision is not an autonomous action', sparse.decision !== 'recommend', `decision=${sparse.decision}`);
+
+  const complete = assessEvidence({ reportedCategory: 'fire', userConfirmed: false, evidence: completeDerived });
+  ck('a described report still abstains without capture', complete.abstain === true, `confidence=${complete.confidence}`);
+
+  const withImage = assessEvidence({ reportedCategory: 'fire', userConfirmed: false, evidence: [...completeDerived, image] });
+  ck('one captured image lifts it out of abstention', withImage.abstain === false, `confidence=${withImage.confidence}`);
+  ck('one captured image reaches recommend', withImage.decision === 'recommend', `decision=${withImage.decision}`);
+  ck('captured evidence raises confidence over derived alone', withImage.confidence > complete.confidence, `${complete.confidence} -> ${withImage.confidence}`);
+}
+
 // ---------------------------------------------------------------- summary
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${'='.repeat(64)}`);

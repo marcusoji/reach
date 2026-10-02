@@ -198,20 +198,36 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   AI Performance page. `/system/health` reports the real breaker state (`Healthy` / `Degraded` /
   `Circuit open`) instead of the string `Configured`. Telemetry writes are best-effort and must never
   fail the assessment.
-- Evidence capture (`0017`): 0015 derived evidence only from what the incident already recorded, so the
-  strong fusion kinds — `image` (0.7), `audio`, `sensor`, `motion` — were unreachable and the engine
-  could never leave `assist`. `attach_incident_evidence` is the client-callable capture path: the
-  citizen uploads to the private `incident-evidence` bucket under `${uid}/…`, then registers the path.
-  Two invariants hold it together:
-  - **The storage path must begin with the caller's own uid.** The `storage.objects` policy and the RPC
-    both enforce it. Without that check a caller could reference someone else's object and have it
-    counted as their evidence.
+- Evidence capture (`0017`, hardened by `0018`): 0015 derived evidence only from what the incident
+  already recorded, so the strong fusion kinds — `image` (0.9), `audio`, `sensor`, `motion` — were
+  unreachable and the engine could never leave `assist`. `attach_incident_evidence` is the
+  client-callable capture path: the citizen uploads to the private `incident-evidence` bucket under
+  `${uid}/…`, then registers the path. The invariants that hold it together:
+  - **The storage path must begin with the caller's own uid**, and must not contain `..`. The
+    `storage.objects` policy and the RPC both enforce it. Without that check a caller could reference
+    someone else's object and have it counted as their evidence.
+  - **A media kind requires a real uploaded object with a matching content type.** 0017 left
+    `storage_path` optional, so a client could claim `image` with no upload at all and collect the
+    strongest weight; 0018 requires the path, the content hash, and a `metadata->>'mimetype'` that
+    matches the claimed kind. The hash makes the object content-addressed, so a re-upload is not
+    counted twice as independent evidence.
   - **The fusion confidence is derived server-side from `kind`**, never sent by the client, and
     `corroboration` is deliberately not an accepted capture kind — it must mean independent
-    corroboration, not a self-asserted flag.
+    corroboration, not a self-asserted flag. `sensor` and `motion` are likewise not client-capturable:
+    they describe device integrations a client cannot perform, so they stay reachable only through the
+    service-role derived path, where the server decides the weight.
+  - **One incident accepts at most 20 evidence rows**, so a single caller cannot flood the fusion.
+- The citizen PWA captures evidence on the review screen (`reach-citizen-pwa/js/evidence.js`) and
+  uploads it with the same content-addressed `${uid}/${sha256}.${ext}` path. A capture taken before the
+  citizen sends has no incident yet, so it is held in IndexedDB and bound at send time — to the real
+  incident id, or to the queued report's idempotency key and rebound when the queue flushes.
+  `js/evidence.js` owns the `reach-offline/evidence-queue` store; `backend.js` only rebinds and flushes it.
 - `ingest_incident_evidence_service` (0015) replaced *all* evidence for an incident; 0017 narrows that
   to rows tagged `derived: true`, so a captured photo survives an assessment. The tag is merged after
   the client metadata, so a caller cannot forge it. When adding anything to the derived path, keep that
   marker and keep `/ai/assess` reading back the full stored set — captured and derived — so the engine
-  fuses what is actually attached. In practice one incident's derived set alone abstains (~51%) while
-  one captured image crosses the threshold (~69%); that separation is the point.
+  fuses what is actually attached. In practice one incident's derived set alone abstains (~45% for a
+  sparse report, ~54% with a description) while one captured image takes it to ~64-72% and a
+  `recommend` decision; that separation is the point. The exact figures drift with the report's age
+  (evidence ages out), so `scripts/tests/ai-engine.mjs` section F pins the qualitative claim --
+  derived-only abstains, one captured image reaches `recommend` -- rather than the decimals.

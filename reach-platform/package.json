@@ -11,11 +11,12 @@
     "validate:migrations": "node scripts/tests/migrations.mjs",
     "validate:hardening": "node scripts/tests/final-hardening.mjs",
     "test:security": "node scripts/tests/security-static.mjs",
-    "validate:all": "npm run validate && npm run validate:hardening && npm run test:security && npm run test:ai && npm run test:relay && npm run test:pwa-relay && npm run test:relay-sim",
+    "validate:all": "npm run validate && npm run validate:hardening && npm run test:security && npm run test:ai && npm run test:relay && npm run test:pwa-relay && npm run test:pwa-evidence && npm run test:relay-sim",
     "test:ai": "node scripts/tests/ai-engine.mjs",
     "test:relay": "node scripts/tests/relay-verify.mjs",
     "test:pwa-relay": "node scripts/tests/pwa-relay-queue.mjs",
-    "test:relay-sim": "node scripts/tests/relay-ingest-sim.mjs"
+    "test:relay-sim": "node scripts/tests/relay-ingest-sim.mjs",
+    "test:pwa-evidence": "node scripts/tests/pwa-evidence-capture.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

@@ -8,6 +8,10 @@ const SUPABASE_ANON_KEY = cfg.SUPABASE_ANON_KEY || '';
 const API_URL = (cfg.API_URL || `${SUPABASE_URL}/functions/v1/api`).replace(/\/$/, '');
 const SESSION_KEY = 'reach_pwa_session';
 const DB_NAME = 'reach-offline';
+// One version for the whole database. IndexedDB throws VersionError if a connection is opened at a
+// lower version than the existing one, so every module that opens `reach-offline` must agree;
+// evidence.js owns the same constant and creates the evidence-queue store.
+const DB_VERSION = 4;
 const STORE = 'incident-queue';
 const RELAY_STORE = 'relay-queue';
 const QUEUE_STATE_QUEUED = 'queued';
@@ -149,6 +153,7 @@ export async function flushQueue(){
         appState.emergency.incidentId=incident.id;
         appState.emergency.incidentCode=incident.code;
       }
+      await rebindQueuedEvidence(item.idempotencyKey,incident.id);
       sent++;
     }catch(err){
       const attempts=(item.attempts||0)+1;
@@ -167,7 +172,7 @@ export async function flushQueue(){
   }
   return {sent,remaining:await queueCount(),dead};
 }
-function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,3);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains('sync-meta'))db.createObjectStore('sync-meta',{keyPath:'key'});if(!db.objectStoreNames.contains(RELAY_STORE))db.createObjectStore(RELAY_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains('sync-meta'))db.createObjectStore('sync-meta',{keyPath:'key'});if(!db.objectStoreNames.contains(RELAY_STORE))db.createObjectStore(RELAY_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
 function put(db,value){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 function allQueued(){return openDb().then(async db=>{await purgeExpired(db,Date.now());return allQueuedFromDb(db);});}
 function allQueuedFromDb(db){return new Promise((resolve,reject)=>{const req=db.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);});}
@@ -175,6 +180,27 @@ function purgeExpired(db,now){return new Promise((resolve,reject)=>{const tx=db.
 function markAttempt(db,item){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');const next={...item,attempts:Number(item.attempts||0)+1,nextAttemptAt:Date.now()+Math.min(5*60*1000,Math.max(5000,2**Math.min(6,Number(item.attempts||0)+1)*1000))};tx.objectStore(STORE).put(next);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 function removeQueued(id){return openDb().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);}));}
 function queueCount(){return allQueued().then(items=>items.length).catch(()=>0);}
+
+/**
+ * Rebind evidence captured before the incident existed.
+ *
+ * A capture taken on the review screen has no incident id yet, so it is queued against the report's
+ * idempotency key. Once the report is accepted the key is meaningless, so the capture is moved onto
+ * the real incident id and attached. Lazy import keeps this module free of a load-order dependency
+ * on evidence.js.
+ */
+async function rebindQueuedEvidence(reportKey, incidentId) {
+  try {
+    const { listEvidenceQueue, queueEvidenceCapture } = await import('./evidence.js');
+    const rows = await listEvidenceQueue();
+    for (const row of rows) {
+      if (row.incidentKey !== reportKey || row.incidentId) continue;
+      await queueEvidenceCapture({ incidentId, incidentKey: null, kind: row.kind, blob: row.blob, mime: row.mime, meta: row.meta });
+      const db = await openDb();
+      await new Promise((resolve, reject) => { const tx = db.transaction('evidence-queue', 'readwrite'); tx.objectStore('evidence-queue').delete(row.id); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    }
+  } catch { /* evidence stays queued; the next flush retries */ }
+}
 
 export function buildIncidentPayload(){const e=appState.emergency;const a=appState.aiDetection;return{
   category:e.category,title:`${e.categoryLabel} emergency`,description:`Citizen-confirmed ${e.categoryLabel.toLowerCase()} emergency from REACH PWA.`,priority:(e.priority||'high').toLowerCase(),source_channel:'pwa',delivery_method:navigator.onLine?'internet':'offline-queue',location_label:e.locationLabel,location_source:e.locationType==='gps'?'gps':e.locationType==='registered'?'registered':'manual',location_accuracy_m:e.locationAccuracyM,latitude:e.latitude,longitude:e.longitude,ai_confidence:Number(a.confidencePct||0),ai_fp_code:a.confidencePct?`FP-${String(e.category).toUpperCase()}-${Math.round(Number(a.confidencePct))}`:null,via_relay:false,location_context:{network:navigator.onLine?'online':'offline',relay_enabled:appState.relayEnabled}
@@ -209,24 +235,42 @@ export async function sendOrQueueEmergency(){
   const payload=buildIncidentPayload(); const key=`pwa-${crypto.randomUUID()}`;
   try{
     if(!navigator.onLine){
-      try{const relayed=await tryNativeRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Native relay';localStorage.setItem('reach_relay_packet_key',key);return relayed;}}catch{}
+      try{const relayed=await tryNativeRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Native relay';localStorage.setItem('reach_relay_packet_key',key);await bindEvidence({reportKey:key});return relayed;}}catch{}
       // No native bridge: queue a signed packet so the gateway can upload it on reconnect.
-      try{const queued=await queueSignedRelayPacket(payload,key); if(queued){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Relay gateway (queued)';return {status:'relay-queued',packet:queued};}}catch{}
+      try{const queued=await queueSignedRelayPacket(payload,key); if(queued){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Relay gateway (queued)';await bindEvidence({reportKey:key});return {status:'relay-queued',packet:queued};}}catch{}
       throw new Error('OFFLINE');
     }
-    const incident=await createIncident(payload,key);appState.emergency.incidentId=incident.id;appState.emergency.incidentCode=incident.code||incident.id;appState.emergency.deliveryMethod='Connected gateway';return{status:'sent',incident};
+    const incident=await createIncident(payload,key);appState.emergency.incidentId=incident.id;appState.emergency.incidentCode=incident.code||incident.id;appState.emergency.deliveryMethod='Connected gateway';await bindEvidence({incidentId:incident.id});void flushEvidenceQueue();return{status:'sent',incident};
   }catch(error){
     const retryable=!error.status || error.status>=500 || error.status===429;
     if(!retryable) return {status:'failed',error};
-    await queueIncident(payload,key);appState.emergency.incidentId=key;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod=hasSession()?'Waiting for connection':'Saved locally — sign in when connected';return{status:'queued',error};
+    await queueIncident(payload,key);appState.emergency.incidentId=key;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod=hasSession()?'Waiting for connection':'Saved locally — sign in when connected';await bindEvidence({reportKey:key});return{status:'queued',error};
   }
+}
+
+/** Claim any capture taken before the report existed. Never fails the send: an unbound capture
+ * simply stays queued and is claimed on a later flush. */
+async function bindEvidence(destination){
+  try{
+    const { bindUnboundEvidence } = await import('./evidence.js');
+    await bindUnboundEvidence(destination);
+  }catch{ /* capture stays unbound; retried on the next send or flush */ }
 }
 
 export async function getContacts(){return (await api('/contacts')).data;}
 export async function addContact(contact){return (await api('/contacts',{method:'POST',body:JSON.stringify(contact)})).data;}
 export async function deleteContact(id){await api(`/contacts/${encodeURIComponent(id)}`,{method:'DELETE'});}
 export async function getRelayCapabilities(){ return detectRelayCapabilities(); }
-export function initBackendSync(){const flush=()=>{void flushQueue();void flushRelayQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
+export function initBackendSync(){const flush=()=>{void flushQueue();void flushRelayQueue();void flushEvidenceQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
+
+/** Attach captures that already have an incident (or a queued report) to attach to. A row whose
+ * emergency report has not been accepted yet is left for rebindQueuedEvidence to repoint. */
+async function flushEvidenceQueue(){
+  try{
+    const { flushEvidenceQueue: flush } = await import('./evidence.js');
+    await flush(row => row.incidentId || null);
+  }catch{ /* evidence stays queued */ }
+}
 
 
 /** Mark offline queue item dead after max attempts — never silent discard. */

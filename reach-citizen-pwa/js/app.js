@@ -14,7 +14,7 @@ import {
   subscribeState
 } from './state.js';
 import { navigateTo, SCREEN_CONFIG } from './navigation.js';
-import { $, $$, setText } from './utils.js';
+import { $, $$, setText, evidenceKindForMime } from './utils.js';
 
 /**
  * Handle Background Relay Switch Toggle
@@ -234,6 +234,78 @@ function syncProfileIntoHome() {
   if (greeting) greeting.textContent = (appState.user.name || 'Citizen').split(' ')[0];
 }
 
+// --- Evidence capture on the review screen -------------------------------------------------
+// Captures are taken before the citizen chooses a category or location, so there is no incident to
+// attach to yet. They are held on the device and claimed at send time (see backend.js bindEvidence).
+
+const EVIDENCE_KIND_LABEL = { image: 'Photo', audio: 'Audio', video: 'Video' };
+
+async function captureEvidence(kind, file) {
+  const status = $('#captureStatus');
+  if (!file) return;
+  const mime = file.type || '';
+  if (evidenceKindForMime(mime) !== kind) {
+    if (status) status.textContent = `That file is not ${EVIDENCE_KIND_LABEL[kind].toLowerCase()} media.`;
+    return;
+  }
+  try {
+    const { queueEvidenceCapture } = await import('./evidence.js');
+    await queueEvidenceCapture({ incidentId: null, incidentKey: null, kind, blob: file, mime, meta: { name: file.name, size: file.size } });
+    await renderCaptureList();
+    if (status) status.textContent = `${EVIDENCE_KIND_LABEL[kind]} attached — held on this device until you send.`;
+  } catch (error) {
+    if (status) status.textContent = `Could not attach that capture: ${error.message || error}`;
+  }
+}
+
+async function renderCaptureList() {
+  const list = $('#captureList');
+  if (!list) return;
+  let rows = [];
+  try {
+    const { listEvidenceQueue } = await import('./evidence.js');
+    rows = await listEvidenceQueue();
+  } catch { rows = []; }
+  const check = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+  // The file name comes from the citizen's own device but is still untrusted text, so it is set as
+  // a text node rather than interpolated into markup.
+  list.replaceChildren();
+  list.insertAdjacentHTML('beforeend', `<div class="evidence-mini-row">${check}<div><b>You confirmed it</b><span>Human sign-off recorded</span></div></div>`);
+  for (const item of rows) {
+    const row = document.createElement('div');
+    row.className = 'evidence-mini-row';
+    row.insertAdjacentHTML('beforeend', check);
+    const body = document.createElement('div');
+    const title = document.createElement('b');
+    title.textContent = `${EVIDENCE_KIND_LABEL[item.kind] || item.kind} attached`;
+    const detail = document.createElement('span');
+    const name = item.meta?.name ? ` · ${item.meta.name}` : '';
+    detail.textContent = `${item.mime || 'media'}${name} · held on this device`;
+    body.append(title, detail);
+    row.appendChild(body);
+    list.appendChild(row);
+  }
+}
+
+function setupCaptureControls() {
+  const open = (inputId) => $(inputId)?.click();
+  $('#capturePhotoBtn')?.addEventListener('click', () => open('#captureCamera'));
+  $('#captureAudioBtn')?.addEventListener('click', () => open('#captureAudio'));
+  $('#captureGalleryBtn')?.addEventListener('click', () => open('#captureGallery'));
+  $('#captureCamera')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; void captureEvidence('image', f); });
+  $('#captureAudio')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; void captureEvidence('audio', f); });
+  $('#captureGallery')?.addEventListener('change', (e) => {
+    const f = e.target.files?.[0]; e.target.value = '';
+    if (!f) return;
+    const kind = evidenceKindForMime(f.type);
+    if (!kind) { const status = $('#captureStatus'); if (status) status.textContent = 'Only photo, audio or video files can be attached as evidence.'; return; }
+    void captureEvidence(kind, f);
+  });
+  void renderCaptureList();
+}
+
+setupCaptureControls();
+
 document.addEventListener('click', event => {
   const target = event.target.closest('[data-loc-type="gps"]');
   if (target) requestGpsLocation();
@@ -268,6 +340,7 @@ async function enhancedNavHandler(event) {
     return true;
   }
   if (target === 'contacts') { void renderContacts(); }
+  if (target === 'confirm') { void renderCaptureList(); }
   if (target === 'tracking' && appState.currentScreen === 'confirm') {
     event.preventDefault();
     event.stopImmediatePropagation();
