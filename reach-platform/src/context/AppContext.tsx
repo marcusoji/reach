@@ -4,11 +4,14 @@ import { INITIAL_INCIDENTS } from '../data/incidents';
 import { INITIAL_STAFF, INITIAL_STAFF_TASKS } from '../data/staff';
 import { INITIAL_INSTITUTIONS, INITIAL_PAYMENT_HISTORY } from '../data/institutions';
 import { INITIAL_DESK_SETTINGS } from '../data/system';
-import { changeIncidentStatus, changeTaskStatus, getInstitutionSummary, isBackendConfigured, isDemoMode, listIncidents, listResponders, listTasks, subscribeToIncidentChanges } from '../lib/reachApi';
+import { changeIncidentStatus, changeTaskStatus, getInstitutionSummary, isBackendConfigured, isDemoMode, listIncidents, listResponders, listTasks, runAiAssessment, subscribeToIncidentChanges } from '../lib/reachApi';
 
 interface AppContextType {
   incidents: Incident[];
   updateIncidentStatus: (id: string, status: IncidentStatus) => void;
+  // Runs the deterministic assessment for one incident, optionally with a second opinion.
+  // Returns the engine's verdict so the caller can surface it; never throws.
+  assessIncident: (id: string, payload?: { description?: string; evidence?: any[]; reported_category?: string }) => Promise<any | null>;
   staff: StaffMember[];
   staffTasks: StaffTask[];
   toggleTaskChecklist: (taskId: string, checkId: string) => void;
@@ -80,6 +83,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void changeIncidentStatus(id, apiStatus).then(() => refreshIncidents()).catch(() => setBackendOnline(false));
   };
 
+  // An assessment costs an external model query when a provider is configured, so this stays an
+  // explicit operator action rather than firing on every incident load.
+  const assessIncident = async (id: string, payload?: { description?: string; evidence?: any[]; reported_category?: string }) => {
+    if (!isBackendConfigured) return null;
+    try {
+      const res = await runAiAssessment(id, payload);
+      await refreshIncidents();
+      return res.data ?? null;
+    } catch {
+      setBackendOnline(false);
+      return null;
+    }
+  };
+
   const toggleTaskChecklist = (taskId: string, checkId: string) => setStaffTasks(prev => prev.map(task => task.id === taskId ? { ...task, checklist: task.checklist.map(item => item.id === checkId ? { ...item, completed: !item.completed } : item) } : task));
   const advanceTaskStatus = (taskId: string, newStatus: StaffTask['status']) => {
     if (!isBackendConfigured && isDemoMode) { setStaffTasks(prev => prev.map(task => task.id === taskId ? { ...task, status:newStatus } : task)); return; }
@@ -89,7 +106,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const recordPayment = (amount = '₦1,450,000.00') => { if (!isBackendConfigured && isDemoMode) setPaymentHistory(prev => [{ id:`pay-${Date.now()}`, date:new Date().toLocaleDateString('en-GB'), code:`PAY-${Date.now().toString().slice(-6)}`, status:'Paid', amount }, ...prev]); };
   const updateDeskSettings = <K extends keyof DeskSettings>(key: K, value: DeskSettings[K]) => setDeskSettings(prev => ({ ...prev, [key]: value }));
 
-  return <AppContext.Provider value={{ incidents, updateIncidentStatus, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, deskSettings, updateDeskSettings, backendOnline, refreshIncidents }}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, deskSettings, updateDeskSettings, backendOnline, refreshIncidents }}>{children}</AppContext.Provider>;
 };
 
 export const useApp = () => { const context = useContext(AppContext); if (!context) throw new Error('useApp must be used within an AppProvider'); return context; };

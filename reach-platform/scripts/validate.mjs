@@ -11,6 +11,7 @@ const required = [
   'supabase/migrations/0005_bmoni_institution_billing.sql',
   'supabase/migrations/0006_production_hardening.sql',
   'supabase/migrations/0007_relay_bmoni_atomic_hardening.sql',
+  'supabase/migrations/0014_ai_second_opinion.sql',
   'supabase/functions/api/index.ts',
   'src/lib/reachApi.ts',
   'src/context/AuthContext.tsx',
@@ -62,6 +63,24 @@ if (!api.includes('const txMatch = path.match')) throw new Error('BMONI payment 
 if (!api.includes('verifyRelayBody(')) throw new Error('Relay verification must use the extracted relay_verify module');
 const relayLockdown = readFileSync(join(root,'supabase/migrations/0011_relay_ingest_lockdown.sql'),'utf8');
 if (!relayLockdown.includes('revoke all on function public.ingest_relay_packet(jsonb) from authenticated')) throw new Error('Legacy relay ingest RPC is still browser-callable');
+
+// AI second-opinion auditability. The model is a second opinion and must stay auditable:
+// its agreement with the engine has to be persistable and readable, or the operator view can
+// only show the fused result and the model's contribution is invisible.
+const aiOpinion = readFileSync(join(root,'supabase/migrations/0014_ai_second_opinion.sql'),'utf8');
+if (!aiOpinion.includes('add column if not exists metadata jsonb')) throw new Error('ai_assessments metadata column missing: model agreement is not persistable');
+if (!aiOpinion.includes("p_decision not in ('assist','recommend')")) throw new Error('Assessment RPC must keep rejecting autonomous decisions');
+if (!aiOpinion.includes('metadata')) throw new Error('Assessment RPC does not persist metadata');
+if (!api.includes("select('id,incident_id,model_name,category,confidence,fp_code,explanation,decision,metadata,created_at')")) throw new Error('GET /ai/assessments must return metadata for the second opinion');
+if (!api.includes('model_agreement: finalResult.model_agreement')) throw new Error('Assessment metadata must record model_agreement');
+const aiPage = readFileSync(join(root,'src/pages/operator/AiPerformancePage.tsx'),'utf8');
+if (aiPage.includes("decision==='auto_push'")) throw new Error('AI performance must not report an auto-push share the engine never produces');
+if (!aiPage.includes('model_agreement')) throw new Error('AI performance page must surface the second opinion');
+// The assessment endpoint is useless without a caller: the operator must be able to run one.
+const reachApi = readFileSync(join(root,'src/lib/reachApi.ts'),'utf8');
+if (!reachApi.includes("'/ai/assess'")) throw new Error('No client path runs an AI assessment');
+const allIncidents = readFileSync(join(root,'src/pages/operator/AllIncidentsPage.tsx'),'utf8');
+if (!allIncidents.includes('assessIncident')) throw new Error('Incidents page does not expose the assessment trigger');
 
 // Static checks above cannot catch SQL that fails to parse or run. Execute the migrations
 // against a throwaway Postgres+PostGIS when one is reachable (see scripts/tests/migrations.mjs).

@@ -774,7 +774,7 @@ Deno.serve(async (req) => {
         p_incident_id: incidentId, p_model_name: finalResult.model_name, p_category: finalResult.category,
         p_confidence: finalResult.confidence, p_fp_code: finalResult.fp_code, p_evidence_ids: [],
         p_explanation: finalResult.explanation, p_decision: finalResult.decision,
-        p_metadata: { evidence_strength: finalResult.evidence_strength, margin: finalResult.margin, abstain: finalResult.abstain, reasons: finalResult.reasons, decision_basis: finalResult.decision_basis, model_used: finalResult.model_used, model_agreement: finalResult.model_agreement, urgency: finalResult.urgency } 
+        p_metadata: { evidence_strength: finalResult.evidence_strength, margin: finalResult.margin, abstain: finalResult.abstain, reasons: finalResult.reasons, decision_basis: finalResult.decision_basis, model_used: finalResult.model_used, model_agreement: finalResult.model_agreement, model_category: finalResult.model_category ?? null, model_confidence: finalResult.model_confidence ?? null, model_evidence_labels: finalResult.model_evidence_labels ?? [], urgency: finalResult.urgency }
       });
       if (error) throw error;
       return json({ data: { assessment: data, ...finalResult } }, 201);
@@ -782,7 +782,9 @@ Deno.serve(async (req) => {
 
     if (path === '/ai/assessments' && req.method === 'GET') {
       if (!['operator', 'super-admin'].includes(profile.role)) return json({ error: 'Not permitted' }, 403);
-      const { data, error } = await supabase.from('ai_assessments').select('id,incident_id,model_name,category,confidence,fp_code,explanation,decision,created_at').order('created_at', { ascending: false }).limit(50);
+      // metadata carries the fusion signals (model_agreement, model_used, model_category,
+      // model_confidence, blockers) that make the second opinion auditable in the operator view.
+      const { data, error } = await supabase.from('ai_assessments').select('id,incident_id,model_name,category,confidence,fp_code,explanation,decision,metadata,created_at').order('created_at', { ascending: false }).limit(50);
       if (error) throw error;
       return json({ data: data ?? [] });
     }

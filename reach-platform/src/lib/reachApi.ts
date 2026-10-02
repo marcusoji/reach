@@ -179,6 +179,11 @@ export async function listInstitutions() { return apiFetch<{ data: any[] }>('/in
 export async function getInstitutionSummary() { return apiFetch<{ data: any }>('/institution/summary'); }
 export async function getOperatorSummary() { return apiFetch<{ data: any }>('/operator/summary'); }
 export async function getAiAssessments() { return apiFetch<{ data: any[] }>('/ai/assessments'); }
+// Run the deterministic engine, optionally with an external second opinion. The engine decides;
+// a model result only contributes a bounded adjustment and can never force an autonomous action.
+export async function runAiAssessment(incidentId: string, payload: { description?: string; evidence?: any[]; reported_category?: string } = {}) {
+  return apiFetch<{ data: any }>('/ai/assess', { method: 'POST', body: JSON.stringify({ incident_id: incidentId, ...payload }) });
+}
 export async function getRelayHealth() { return apiFetch<{ data: any }>('/relay/health'); }
 export async function getSystemHealth() { return apiFetch<{ data: any[] }>('/system/health'); }
 export async function listAuditLogs() { return apiFetch<{ data: any[] }>('/audit'); }

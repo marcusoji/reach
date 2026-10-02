@@ -174,3 +174,8 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `helix-advisor`, which returns bare JSON. Even so the second opinion is intermittent — `helix-advisor`
   sometimes answers in prose at `temperature: 0` — so `model_agreement: 'none'` is normal, not a bug.
   See `docs/HELIX_API_TEST_NOTES.md` §2.1, §3.6, §3.7.
+- The model's contribution is persisted in `ai_assessments.metadata` (migration `0014`), not just the
+  audit log. Without it `model_agreement` cannot be queried back and the operator view can only show
+  the fused result. The assessment is triggered deliberately by the operator (All Incidents → "Run AI
+  assessment") rather than automatically, because each call can spend a daily Helix query; the verdict
+  and the second opinion are read back on the AI Performance page. Keep those two pages in step.

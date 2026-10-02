@@ -255,7 +255,32 @@ REACH_AI_BREAKER_THRESHOLD=3           # optional; fail over sooner than the def
 These are Edge Function secrets (`Deno.env`), never `VITE_` variables. The engine continues
 to decide; the model only contributes a second opinion and can never force a `recommend`.
 
-## 7. Follow-ups for Launchverse
+## 7. How the second opinion is surfaced in REACH
+
+The assessment endpoint (`POST /ai/assess`) is called from the operator's **All Incidents**
+page, one incident at a time, via the "Run AI assessment" button. It is a deliberate
+operator action rather than an automatic side effect of loading an incident, because each
+call can spend one of the 20 daily Helix queries.
+
+The engine's verdict and the model's contribution are then readable on the operator's
+**AI Performance** page, which shows per assessment:
+
+- the fused verdict (`category`, `confidence`, `decision`) and its `fp_code`
+- a badge for the second opinion: *Model agrees* / *Model disagrees* / *No second opinion*
+- the model's own `category`, `confidence` and `evidence_labels` when one was used
+- the abstention blockers, when the engine abstained
+
+That view is backed by `ai_assessments.metadata` (migration `0014_ai_second_opinion.sql`),
+which persists the fusion signals the API already computed. Before that column existed,
+`model_agreement` reached only the audit log and could not be queried back out, so the
+model's contribution was invisible.
+
+Note the two headline figures on that page: **Second opinion obtained** is the share of
+assessments where the model returned usable JSON at all — expect this to be well under
+100% given §3.6 — and **Model agreement** is computed only over those, not over all
+assessments.
+
+## 8. Follow-ups for Launchverse
 
 1. Return a non-2xx status when credit is exhausted, instead of 200 plus prose.
 2. Use a permissions error code for a model-scope failure, not `insufficient_quota`.
