@@ -4,5 +4,5 @@ window.REACH_CONFIG = {
   SUPABASE_URL: '',
   SUPABASE_ANON_KEY: '',
   API_URL: '',
-  DEMO_MODE: false
+  DEMO_MODE: true
 };
