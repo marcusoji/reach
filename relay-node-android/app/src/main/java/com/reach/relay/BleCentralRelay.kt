@@ -25,6 +25,9 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     private var packetHash: String = ""
     private var seq = 0
     private var total = 0
+    // Random per-transfer id so a receiver can tell concurrent transfers apart; the frame layout
+    // is [transferId:4][seq:1][total:1][payload...], shared with BleTransfer.
+    private var transferId = ByteArray(4)
     // ATT payload ceiling for the link. 23 is the BLE default MTU, so 20 bytes is the largest
     // value a characteristic write may carry until the peer grants a larger MTU. Writing more
     // than this fails the ATT write, so fragments must be sized from the negotiated MTU.
@@ -57,6 +60,7 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
         finished = false
         started = false
         fragmentBytes = 20
+        java.security.SecureRandom().nextBytes(transferId)
         pending = packet
         packetId = id
         packetHash = hash
@@ -185,7 +189,7 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
         chunkSize = fragmentBytes
         total = (packet.size + chunkSize - 1) / chunkSize
         // seq/total are single bytes in the frame header; more than 255 fragments cannot be framed.
-        if (total > 255) { finish(false, null); return }
+        if (total > BleTransfer.MAX_TOTAL) { finish(false, null); return }
         seq = 0
         writeNext(g)
     }
@@ -195,8 +199,7 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
         val start = seq * chunkSize
         val end = minOf(packet.size, start + chunkSize)
         val chunk = packet.copyOfRange(start, end)
-        val header = byteArrayOf(seq.toByte(), total.toByte())
-        val frame = header + chunk
+        val frame = BleTransfer.frame(transferId, seq, total, chunk)
         dataChar?.value = frame
         dataChar?.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         seq++

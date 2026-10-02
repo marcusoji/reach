@@ -83,21 +83,24 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
-        fun configureSession(apiUrl: String, accessToken: String) {
+        fun configureSession(apiUrl: String, accessToken: String, anonKey: String) {
             if (!originOk()) return
-            if (!apiUrl.startsWith("https://") && !apiUrl.startsWith("http://localhost") && !apiUrl.startsWith("http://127.0.0.1")) return
-            // Session registration hooks (gateway uplink) — kept minimal
+            RelayGatewayUploader.configure(activity, apiUrl, accessToken, anonKey)
         }
 
         @JavascriptInterface
-        fun sendPacket(packet: String): Boolean {
-            if (!originOk()) return false
+        fun sendPacket(packet: String): String {
+            if (!originOk()) return "{\"accepted\":false}"
             return try {
                 val valid = RelayProtocol.validate(packet.toByteArray(Charsets.UTF_8))
                 RelayForwarder.enqueue(activity, valid)
-                true
+                org.json.JSONObject()
+                    .put("accepted", true)
+                    .put("packet_key", valid.optString("k"))
+                    .put("packet_hash", valid.optString("x"))
+                    .toString()
             } catch (_: Exception) {
-                false
+                "{\"accepted\":false}"
             }
         }
     }

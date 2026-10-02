@@ -49,6 +49,7 @@ export async function connectBluetoothRelay({serviceUuid,dataCharacteristicUuid}
 
 export async function sendBluetoothPacket(connection,packet){
   const bytes=enc(JSON.stringify(packet)); if(bytes.byteLength>RELAY_LIMITS.maxBytes)throw new Error('Relay packet exceeds maximum size.');
-  const transfer=crypto.getRandomValues(new Uint8Array(16)); const total=Math.ceil(bytes.byteLength/RELAY_LIMITS.bleChunkBytes); if(total>64)throw new Error('Relay packet needs too many BLE fragments.');
-  for(let seq=0;seq<total;seq++){const start=seq*RELAY_LIMITS.bleChunkBytes;const body=bytes.slice(start,start+RELAY_LIMITS.bleChunkBytes);const frame=new Uint8Array(20+body.length);frame.set(transfer,0);new DataView(frame.buffer).setUint16(16,seq);new DataView(frame.buffer).setUint16(18,total);frame.set(body,20);await connection.characteristic.writeValueWithResponse(frame);}
+  // Frame layout [transferId:4][seq:1][total:1][payload...] — shared with the native relay node.
+  const transfer=crypto.getRandomValues(new Uint8Array(4)); const total=Math.ceil(bytes.byteLength/RELAY_LIMITS.bleChunkBytes); if(total>255)throw new Error('Relay packet needs too many BLE fragments.');
+  for(let seq=0;seq<total;seq++){const start=seq*RELAY_LIMITS.bleChunkBytes;const body=bytes.slice(start,start+RELAY_LIMITS.bleChunkBytes);const frame=new Uint8Array(6+body.length);frame.set(transfer,0);frame[4]=seq;frame[5]=total;frame.set(body,6);await connection.characteristic.writeValueWithResponse(frame);}
 }

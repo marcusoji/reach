@@ -6,8 +6,13 @@ build runs from a clean checkout with only a JDK and the Android SDK:
 ```bash
 cd relay-node-android
 echo "sdk.dir=$ANDROID_HOME" > local.properties   # local only, git-ignored
-./gradlew assembleDebug lint
+./gradlew assembleDebug lint testDebugUnitTest
 ```
+
+`testDebugUnitTest` runs the JVM unit tests (Robolectric): BLE fragment reassembly
+(`BleTransferTest`), the durable queue (`RelayQueueDbTest`), the canonical/envelope contract
+(`RelayProtocolTest`) and the gateway uploader (`RelayGatewayUploaderTest`, including a real
+loopback HTTP round trip).
 
 CI job (see `.github/workflows/ci.yml`) runs the same on JDK 17 once the
 wrapper jar is present.

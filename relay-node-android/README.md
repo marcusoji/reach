@@ -42,6 +42,21 @@ Citizen PWA
 - packet size is capped;
 - packet validation happens before persistence.
 
+## Gateway uplink
+
+A node with connectivity drains its durable queue straight to the gateway over HTTPS; a node
+without connectivity forwards over radio instead.
+
+- the PWA hands the node the gateway base URL, the session access token and the anon key through
+  the `REACH_NATIVE_RELAY` bridge (`configureSession`); the session is stored on the device and is
+  only accepted for an `https://` origin (or loopback for local development);
+- each queued packet is POSTed to `/relay/packets` as the server body (`transport: "native"`);
+- a packet that already travelled a radio hop (`h > 0`) is wrapped in this node's relay envelope
+  before upload, because the gateway rejects a non-zero hop count that no relay envelope vouches
+  for; the hop count itself is not incremented on upload;
+- the row is deleted only on a 2xx response; any other outcome (including no connectivity) leaves
+  it queued and it is retried with the same backoff as a radio hop.
+
 ## Security
 
 Each native node generates a P-256 ECDSA identity in Android Keystore. The private key never leaves the device. Source packets and relay envelopes are signed. The backend verifies the signatures and requires registered, active devices.

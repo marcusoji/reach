@@ -6,8 +6,8 @@
 export const RELAY_MAX_HOPS = 6;
 export const RELAY_TTL_MS = 30 * 60 * 1000;
 
-const SOURCE_SIGNED_KEYS = ['v', 'k', 'e', 'm', 'incident_id', 'source_device_id', 'minimal_payload'];
-const RELAY_SIGNED_KEYS = ['v', 'k', 'e', 'h', 'm', 'incident_id', 'source_device_id', 'x', 'relay_device_id', 'minimal_payload'];
+export const SOURCE_SIGNED_KEYS = ['v', 'k', 'e', 'm', 'incident_id', 'source_device_id', 'minimal_payload'];
+export const RELAY_SIGNED_KEYS = ['v', 'k', 'e', 'h', 'm', 'incident_id', 'source_device_id', 'x', 'relay_device_id', 'minimal_payload'];
 
 const value = (v: unknown) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v));
 const build = (p: Record<string, unknown>, keys: string[]) => keys.map((k) => `${k}=${value(p[k])}`).join('&');

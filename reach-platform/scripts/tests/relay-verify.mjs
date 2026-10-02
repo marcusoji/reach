@@ -30,7 +30,7 @@ const transpile = (file) => {
 };
 const relayProtocolHref = transpile('relay_protocol.ts');
 const relayVerifyHref = transpile('relay_verify.ts');
-const { canonicalSourceSigned, canonicalRelaySigned, relayFingerprint } = await import(relayProtocolHref);
+const { canonicalSourceSigned, canonicalRelaySigned, relayFingerprint, SOURCE_SIGNED_KEYS, RELAY_SIGNED_KEYS } = await import(relayProtocolHref);
 const { verifyRelayBody } = await import(relayVerifyHref);
 
 // --- indexedDB shim so the real PWA protocol.js can persist its identity ---
@@ -268,24 +268,25 @@ S('H. BLE framing (PWA sender, fake GATT characteristic)');
   const connection = { characteristic: { writeValueWithResponse: async (frame) => { written.push(new Uint8Array(frame)); } } };
   const { packet } = await build();
   await sendBluetoothPacket(connection, packet);
-  const reassembled = new Uint8Array(written.reduce((n, f) => n + f.length - 20, 0));
+  const HEADER = 6;
+  const reassembled = new Uint8Array(written.reduce((n, f) => n + f.length - HEADER, 0));
   let off = 0;
   const totals = new Set();
   for (const f of written) {
-    const seq = new DataView(f.buffer, f.byteOffset).getUint16(16);
-    const total = new DataView(f.buffer, f.byteOffset).getUint16(18);
+    const total = f[5];
     totals.add(total);
-    if (seq !== written.indexOf(f)) { /* ordering check below */ }
-    reassembled.set(f.slice(20), off); off += f.length - 20;
+    reassembled.set(f.slice(HEADER), off); off += f.length - HEADER;
   }
   const json = new TextDecoder().decode(reassembled);
-  ck('BLE frames carry a 16-byte transfer id + seq + total header', written.every((f) => f.length > 20));
+  const transferIds = new Set(written.map((f) => [...f.slice(0, 4)].join(',')));
+  ck('BLE frames carry a 4-byte transfer id + seq + total header', written.every((f) => f.length > HEADER));
+  ck('every fragment shares one transfer id', transferIds.size === 1, `ids=${transferIds.size}`);
   ck('all frames agree on the fragment total', totals.size === 1, `totals=${[...totals]}`);
   ck('fragment count matches the frame total', [...totals][0] === written.length, `total=${[...totals][0]} frames=${written.length}`);
   ck('reassembled payload is byte-identical to the packet', json === JSON.stringify(packet));
-  ck('each fragment body respects the 180-byte chunk limit', written.every((f) => f.length - 20 <= RELAY_LIMITS.bleChunkBytes));
+  ck('each fragment body respects the 180-byte chunk limit', written.every((f) => f.length - HEADER <= RELAY_LIMITS.bleChunkBytes));
   // frames are emitted in order
-  const seqs = written.map((f) => new DataView(f.buffer, f.byteOffset).getUint16(16));
+  const seqs = written.map((f) => f[4]);
   ck('fragments are emitted in sequence order', seqs.every((s, i) => s === i), `seqs=${seqs.slice(0, 6)}...`);
 }
 
@@ -298,6 +299,33 @@ S('I. Production wiring guards');
   ck('index.ts still calls the trusted service RPC', indexTs.includes("rpc('ingest_relay_packet_service'"));
   const verifyTs = readFileSync(path.join(API, 'relay_verify.ts'), 'utf8');
   ck('verifier binds the fingerprint to the signed payload', verifyTs.includes('relayFingerprint(sourceSignedPayload)'));
+}
+
+// =====================================================================
+S('J. Cross-language canonical key order (Kotlin relay node)');
+{
+  // The Kotlin node mirrors this canonicalisation in DeviceIdentity.kt. The key order is the
+  // contract; if it drifts, every signature the node produces is rejected. Assert the exact
+  // quoted key lists rather than a loose presence check.
+  const identityKt = readFileSync(path.join(HERE, '..', '..', '..', 'relay-node-android', 'app', 'src', 'main', 'java', 'com', 'reach', 'relay', 'DeviceIdentity.kt'), 'utf8');
+  const kotlinList = (fn) => {
+    const m = identityKt.match(new RegExp(`fun ${fn}\\(packet:org\\.json\\.JSONObject\\):String = listOf\\(([\\s\\S]*?)\\)\\.joinToString`));
+    return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : null;
+  };
+  const source = kotlinList('canonicalSource');
+  const relay = kotlinList('canonicalRelay');
+  ck('DeviceIdentity.canonicalSource found', Array.isArray(source));
+  ck('DeviceIdentity.canonicalRelay found', Array.isArray(relay));
+  ck('Kotlin source key order matches the shared contract',
+    JSON.stringify(source) === JSON.stringify(['v', 'k', 'e', 'm', 'incident_id', 'source_device_id', 'minimal_payload']),
+    JSON.stringify(source));
+  ck('Kotlin relay key order matches the shared contract',
+    JSON.stringify(relay) === JSON.stringify(['v', 'k', 'e', 'h', 'm', 'incident_id', 'source_device_id', 'x', 'relay_device_id', 'minimal_payload']),
+    JSON.stringify(relay));
+  ck('Kotlin source canonical omits x', !source.includes('x'));
+  // The TS/PWA lists must agree with each other and with Kotlin.
+  ck('TS source key order matches Kotlin', JSON.stringify([...SOURCE_SIGNED_KEYS]) === JSON.stringify(source));
+  ck('TS relay key order matches Kotlin', JSON.stringify([...RELAY_SIGNED_KEYS]) === JSON.stringify(relay));
 }
 
 // =====================================================================

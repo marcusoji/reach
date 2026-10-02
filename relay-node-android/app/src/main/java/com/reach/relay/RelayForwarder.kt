@@ -7,13 +7,17 @@ import android.util.Log
 import org.json.JSONObject
 
 /**
- * Forwards due packets over BLE then Wi-Fi Direct.
- * Deletes only after verified ACK. Crash during SENDING recovers to PENDING.
+ * Drains due packets: a node with gateway connectivity uploads directly, otherwise it forwards
+ * over BLE then Wi-Fi Direct. Deletes only after a verified ACK (radio) or a 2xx upload.
+ * Crash during SENDING recovers to PENDING.
  */
 object RelayForwarder {
     private const val TAG = "ReachRelay"
     @Volatile private var running = false
     private val handler = Handler(Looper.getMainLooper())
+    // Gateway uploads block on HTTP, which is not allowed on the main thread; radio forwarding is
+    // asynchronous and returns on the main looper, so only the upload path needs its own thread.
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     fun enqueue(context: Context, packet: JSONObject) {
         try {
@@ -63,6 +67,19 @@ object RelayForwarder {
         if (hops >= max) {
             db.markDead(id, "hop_limit")
             processNext(context, db, batch, index + 1)
+            return
+        }
+
+        // Connected node: upload straight to the gateway, no radio hop needed.
+        if (RelayGatewayUploader.isConfigured(context)) {
+            db.markSending(id, "gateway", null)
+            io.execute {
+                val delivered = RelayGatewayUploader.upload(context, packet)
+                handler.post {
+                    if (delivered) db.success(id) else db.retry(id, "gateway_failed", "gateway")
+                    processNext(context, db, batch, index + 1)
+                }
+            }
             return
         }
 

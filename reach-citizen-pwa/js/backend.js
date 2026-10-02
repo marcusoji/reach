@@ -35,7 +35,7 @@ export function hasSession() { return Boolean(getSession()?.access_token); }
 async function registerRelayDevice(session){
   try{ if(!session?.access_token || !backendConfigured)return; const id=await getRelayIdentity(); await fetch(`${API_URL}/devices/register`,{method:'POST',headers:{...authHeaders(session.access_token)},body:JSON.stringify({device_id:id.deviceId,public_key:id.publicKeyB64,platform:'pwa',metadata:{transport:'web-bluetooth',protocol_version:2}})}); }catch{}
 }
-function syncNativeBridgeSession(session){ try { const bridge=window.REACH_NATIVE_RELAY; if(bridge?.configureSession && session?.access_token) bridge.configureSession(API_URL,session.access_token); } catch {} void registerRelayDevice(session); }
+function syncNativeBridgeSession(session){ try { const bridge=window.REACH_NATIVE_RELAY; if(bridge?.configureSession && session?.access_token) bridge.configureSession(API_URL,session.access_token,SUPABASE_ANON_KEY); } catch {} void registerRelayDevice(session); }
 
 async function refreshSession() {
   const current = getSession(); if (!current?.refresh_token) return null;
@@ -185,8 +185,15 @@ async function tryNativeRelay(payload,key){
   if(!bridge || typeof bridge.sendPacket!=='function' || !appState.relayEnabled) return null;
   const built=await buildRelayPacket({packetKey:key,incidentId:null,category:payload.category,priority:payload.priority,title:payload.title,description:payload.description,locationLabel:payload.location_label,locationSource:payload.location_source,locationAccuracyM:payload.location_accuracy_m,latitude:payload.latitude,longitude:payload.longitude});
   const accepted=await bridge.sendPacket(JSON.stringify(built.packet));
-  if(accepted===false || accepted==='false') throw new Error('Native relay did not accept the packet');
-  return {status:'relay-queued',packet:built.packet};
+  // The bridge returns {accepted, packet_key, packet_hash} as a JSON string; older builds
+  // returned a plain boolean. Anything that is not an explicit rejection counts as accepted.
+  let ok=true, ack={};
+  if(accepted===false || accepted==='false') ok=false;
+  else if(typeof accepted==='string'){
+    try{ ack=JSON.parse(accepted); if(ack.accepted===false) ok=false; }catch{ /* non-JSON truthy response */ }
+  }
+  if(!ok) throw new Error('Native relay did not accept the packet');
+  return {status:'relay-queued',packet:built.packet,packetKey:ack.packet_key,packetHash:ack.packet_hash};
 }
 
 /** Build a signed packet and queue it for the gateway. Returns null when relay is disabled. */

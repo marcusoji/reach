@@ -94,7 +94,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: chmod +x gradlew
-      - run: ./gradlew assembleDebug lint --stacktrace
+      - run: ./gradlew assembleDebug lint testDebugUnitTest --stacktrace
 
   security-scripts:
     runs-on: ubuntu-latest

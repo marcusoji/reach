@@ -72,16 +72,41 @@ object RelayProtocol {
         return DeviceIdentity.signSourcePacket(p)
     }
 
-    fun nextHop(o: JSONObject): JSONObject {
+    /** Pure hop advance: increments h and strips any relay envelope inherited from a prior hop. */
+    fun advanceHop(o: JSONObject): JSONObject {
         val p = JSONObject(o.toString())
         val hops = p.optInt("h") + 1
         require(hops < p.optInt("m", MAX_HOPS).coerceAtMost(MAX_HOPS)) { "Hop limit" }
         p.put("h", hops)
+        stripRelayEnvelope(p)
+        return p
+    }
+
+    fun nextHop(o: JSONObject): JSONObject = DeviceIdentity.signRelayPacket(advanceHop(o))
+
+    /**
+     * Pure form of a direct-to-gateway relay envelope: keeps the hop count but drops any relay
+     * identity so this node can sign its own. The packet's `h` already reflects the radio hops
+     * it travelled to reach this node, so no hop is added here.
+     */
+    fun relayEnvelopeFor(o: JSONObject): JSONObject {
+        val p = JSONObject(o.toString())
+        stripRelayEnvelope(p)
+        return p
+    }
+
+    /**
+     * Sign this device as the relay for a direct-to-gateway upload without advancing the hop
+     * count. The gateway requires a relay envelope whenever h > 0, so one must be present even
+     * though this node adds no hop.
+     */
+    fun gatewayRelayEnvelope(o: JSONObject): JSONObject = DeviceIdentity.signRelayPacket(relayEnvelopeFor(o))
+
+    private fun stripRelayEnvelope(p: JSONObject) {
         p.remove("relay_signature")
         p.remove("relay_signed_payload")
         p.remove("relay_device_id")
         p.remove("relay_public_key")
-        return DeviceIdentity.signRelayPacket(p)
     }
 
     /** ACK after receiver validates + persists. */
