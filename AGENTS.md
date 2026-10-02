@@ -4,7 +4,7 @@
 
 - `reach-platform/` — React + Vite + TypeScript operations platform (4 roles: security-desk, staff, institution, operator).
 - `reach-citizen-pwa/` — vanilla-JS citizen emergency PWA (no build step).
-- `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0011`) and the `api` Edge Function (`functions/api/`).
+- `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0012`) and the `api` Edge Function (`functions/api/`).
 - `relay-node-android/` — native Android relay (Kotlin). `bmoni-institution-mobile/` — Flutter BMONI signing service.
 - `docs/` — **all** product documentation; start at `docs/README.md`. Keep the root free of loose notes: only `README.md` and `AGENTS.md` live there. Merge new fix logs into `docs/HARDENING_LOG.md` and release notes into `docs/RELEASE_NOTES.md` rather than adding another root `*_FIXES.md`.
 - `tests/` — RLS, BMONI webhook, load (k6) and AI-calibration harnesses.
@@ -118,10 +118,13 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   The attempt count must be read from the `relay_queue` row: the packet JSON is re-parsed on every
   drain, so a counter carried in the packet object resets to 0 each cycle and the packet would retry
   until TTL. There are no Android unit tests — this is only exercised by physical-device matrices.
-- Several RPCs scope by institution with `if i.institution_id <> public.current_institution_id()`
-  (`transition_assignment`, `transition_incident`, `assign_incident`) rather than `is distinct from`.
-  A caller whose own `institution_id` is NULL — an `operator` with no institution, or a `staff`/
-  `institution` account that somehow lost its institution — makes that comparison NULL, so the guard
-  does not fire and the cross-tenant branch is skipped. Reaching it needs an anomalous account
-  (redeem_staff_invite always sets an institution, and `protect_profile_privileges` blocks
-  self-nulling), so it is a latent gap, not a live hole. Prefer `is distinct from` in new RPCs.
+- Tenant scoping must use `is distinct from`, not `<>`, when comparing a row's institution to
+  `public.current_institution_id()`. `<>` is NULL when the caller has no institution, so
+  `if x.institution_id <> current_institution_id() then raise ...` silently skips the guard and the
+  cross-tenant branch runs. `0012_null_safe_authorization.sql` fixes `transition_incident`,
+  `assign_incident`, `transition_assignment`, `create_institution_for_current_user` and
+  `register_my_relay_device`; the suite's assertions 8–9 pin it. (`promote_current_user_to_operator`
+  is redefined there too, but its ACL — revoked from `authenticated` by 0006 — must not be re-granted.)
+- `tests/rls_tenant_isolation.sql` seeds profiles with an upsert, not `on conflict do nothing`:
+  inserting `auth.users` fires `handle_new_user`, which already creates a `citizen`/NULL-institution
+  profile, so a do-nothing insert is a silent no-op and the suite would run entirely as citizens.

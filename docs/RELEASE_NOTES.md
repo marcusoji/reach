@@ -34,7 +34,7 @@ Android-device, penetration and load testing remain required.
 
 Run migrations in order and do not skip earlier ones:
 
-`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011`
+`0001 → ... → 0011 → 0012`
 
 ## Demo mode (local only)
 

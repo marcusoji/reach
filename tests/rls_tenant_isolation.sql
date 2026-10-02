@@ -26,24 +26,43 @@ values
   ('aaaaaaaa-0000-0000-0000-000000000002', 'staff.a@example.test'),
   ('aaaaaaaa-0000-0000-0000-000000000003', 'desk.a@example.test'),
   ('bbbbbbbb-0000-0000-0000-000000000001', 'citizen.b@example.test'),
-  ('cccccccc-0000-0000-0000-000000000001', 'operator@example.test')
+  ('cccccccc-0000-0000-0000-000000000001', 'operator@example.test'),
+  ('dddddddd-0000-0000-0000-000000000001', 'drifting.staff@example.test'),
+  ('eeeeeeee-0000-0000-0000-000000000001', 'drifting.desk@example.test')
 on conflict (id) do nothing;
 
+-- auth.users inserts fire handle_new_user, which already creates a minimal
+-- ('citizen', NULL institution) profile. A plain `on conflict do nothing` would
+-- therefore be a no-op and every role/institution below would be discarded,
+-- leaving the suite to run as citizens with no institution. Upsert instead.
 insert into profiles (id, full_name, role, institution_id)
 values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'Citizen A',  'citizen',       '11111111-1111-1111-1111-111111111111'),
   ('aaaaaaaa-0000-0000-0000-000000000002', 'Staff A',    'staff',         '11111111-1111-1111-1111-111111111111'),
   ('aaaaaaaa-0000-0000-0000-000000000003', 'Desk A',     'security-desk', '11111111-1111-1111-1111-111111111111'),
   ('bbbbbbbb-0000-0000-0000-000000000001', 'Citizen B',  'citizen',       '22222222-2222-2222-2222-222222222222'),
-  ('cccccccc-0000-0000-0000-000000000001', 'Operator',   'operator',      null)
-on conflict (id) do nothing;
+  ('cccccccc-0000-0000-0000-000000000001', 'Operator',   'operator',      null),
+  -- Anomalous accounts with no institution. These exercise the NULL-comparison
+  -- guards in the authorization RPCs (migration 0012).
+  ('dddddddd-0000-0000-0000-000000000001', 'Drifting Staff', 'staff',         null),
+  ('eeeeeeee-0000-0000-0000-000000000001', 'Drifting Desk',  'security-desk', null)
+on conflict (id) do update set
+  full_name = excluded.full_name, role = excluded.role, institution_id = excluded.institution_id;
 
 insert into incidents (id, institution_id, reporter_id, category, status, title)
 values
   ('a0000000-0000-0000-0000-00000000000a', '11111111-1111-1111-1111-111111111111',
    'aaaaaaaa-0000-0000-0000-000000000001', 'fire', 'reported', 'A fire'),
   ('b0000000-0000-0000-0000-00000000000b', '22222222-2222-2222-2222-222222222222',
-   'bbbbbbbb-0000-0000-0000-000000000001', 'medical', 'reported', 'B medical')
+   'bbbbbbbb-0000-0000-0000-000000000001', 'medical', 'reported', 'B medical'),
+  ('a0000000-0000-0000-0000-00000000000c', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'security', 'verified', 'A verified incident')
+on conflict (id) do nothing;
+
+insert into responders (id, user_id, institution_id, responder_type, duty_status)
+values
+  ('ffffffff-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002',
+   '11111111-1111-1111-1111-111111111111', 'staff', 'on_duty')
 on conflict (id) do nothing;
 
 commit;
@@ -174,5 +193,48 @@ begin
   end if;
 end $$;
 \echo 'PASS 7 - citizen cannot create cross-institution incident'
+
+-- 8) A staff account whose institution_id is NULL must NOT be able to act on an
+--    institution's incident. The old guard `i.institution_id <> current_institution_id()`
+--    is NULL when the caller has no institution, so the check silently passed. 0012
+--    makes it `is distinct from`, which is true here.
+do $$
+declare before_status public.incident_status; after_status public.incident_status; denied boolean := false;
+begin
+  select status into before_status from incidents where id = 'a0000000-0000-0000-0000-00000000000a';
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'dddddddd-0000-0000-0000-000000000001', true);
+  begin
+    perform transition_incident('a0000000-0000-0000-0000-00000000000a', 'received');
+  exception when others then denied := true;
+  end;
+  reset role;
+  select status into after_status from incidents where id = 'a0000000-0000-0000-0000-00000000000a';
+  if not denied then
+    raise exception 'FAIL 8: NULL-institution staff transitioned an incident (% -> %)', before_status, after_status;
+  end if;
+end $$;
+\echo 'PASS 8 - NULL-institution staff cannot transition another institution''s incident'
+
+-- 9) Same NULL-comparison shape in assign_incident: a security-desk account with no
+--    institution must not be able to assign a responder to an institution's incident.
+do $$
+declare n int; denied boolean := false;
+begin
+  select count(*) into n from incident_assignments where incident_id = 'a0000000-0000-0000-0000-00000000000c';
+  if n <> 0 then raise exception 'FAIL 9: fixture incident already has an assignment'; end if;
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', 'eeeeeeee-0000-0000-0000-000000000001', true);
+  begin
+    perform assign_incident('a0000000-0000-0000-0000-00000000000c', 'ffffffff-0000-0000-0000-000000000001');
+  exception when others then denied := true;
+  end;
+  reset role;
+  select count(*) into n from incident_assignments where incident_id = 'a0000000-0000-0000-0000-00000000000c';
+  if not denied or n <> 0 then
+    raise exception 'FAIL 9: NULL-institution desk assigned a responder (denied=%, rows=%)', denied, n;
+  end if;
+end $$;
+\echo 'PASS 9 - NULL-institution desk cannot assign a responder cross-tenant'
 
 \echo '=== RLS isolation suite complete ==='

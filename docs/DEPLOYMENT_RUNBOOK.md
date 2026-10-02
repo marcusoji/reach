@@ -97,7 +97,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Migrations apply in filename order, `0001` → `0011`. **Never skip one.** If you
+Migrations apply in filename order, `0001` → `0012`. **Never skip one.** If you
 prefer, paste each file into the Supabase SQL editor in the same order.
 
 ### 3.3 Enable Realtime
@@ -484,7 +484,7 @@ These require a deployed staging environment and, for pen/load, dedicated toolin
   claim. Measure precision, recall, false positive/negative rate, calibration,
   abstention and latency. Keep the UI labelled advisory.
 - **Cutover:** `VITE_REACH_DEMO_MODE=false` everywhere, production Supabase URL and
-  anon key, migrations `0001`–`0011` on production, production secrets, monitoring
+  anon key, migrations `0001`–`0012` on production, production secrets, monitoring
   and backups.
 
 ---
