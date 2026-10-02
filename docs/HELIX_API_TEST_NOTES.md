@@ -31,18 +31,44 @@ POST https://api.launchverse.app/api/v1/chat/completions
 Authorization: Bearer helix_…
 ```
 
-Standard OpenAI response shape (`choices[0].message.content`, `usage`). Model access for
-this key, observed:
+Standard OpenAI response shape (`choices[0].message.content`, `usage`). Access was observed
+against two keys, which gave different results — the second key had been topped up:
 
-| Model | Result |
-|-------|--------|
-| `helix-advisor` | **200, working, has credit** |
-| `helix-autopilot` | 200 but `"Helix credit balance exhausted. Top up to continue."` |
-| `helix/swe-v1` | 200 but credit exhausted |
-| `helix/devops-v1` | 200 but credit exhausted |
-| `helix-operator` | **403** `"API key scope does not allow this model"` |
+| Model | Key A (`…p2JU`) | Key B (`…5df0`) |
+|-------|-----------------|-----------------|
+| `helix-advisor` | 200, working | 200, working |
+| `helix-autopilot` | 200, credit exhausted | **200, working** (agentic) |
+| `helix/swe-v1` | 200, credit exhausted | **200, working** (agentic) |
+| `helix/devops-v1` | 200, credit exhausted | **200, working** (agentic) |
+| `helix-operator` | 403, scope | **403, scope** |
 
-So exactly one usable model was available for testing: **`helix-advisor`**.
+`helix-operator` was scope-blocked on both keys. `helix_` keys are **not** accepted on the
+account host — `launchverse.app/api/v1/me` returns 401 for them.
+
+### 2.1 The models are agentic, and answer a classification task as a work report
+
+This is the most important property to understand before choosing a model. `helix-autopilot`,
+`helix/swe-v1` and `helix/devops-v1` are **software-engineering agents**. Given the REACH
+classification prompt they return the correct JSON object — and then keep going, appending
+an agent work report to the same completion:
+
+```
+{"category":"fire","confidence":95}
+
+## Delivery
+- **Changed:** no repository changes
+- **Verified:** no automated checks were run in this run
+- **Uncertain:** nothing flagged
+```
+
+The JSON is correct and comes **first**, so `JSON.parse` on the whole string throws and
+`modelAssist` discards a perfectly good assessment. `helix/swe-v1` instead appends
+*"I've hit my turn limit mid-task…"*. Only `helix-advisor` returns a bare JSON object with
+zero trailing content.
+
+**Recommendation: use `helix-advisor` for this role.** If an agentic model is ever wanted,
+the adapter must extract the leading JSON object (see §3.6) rather than parsing the whole
+completion.
 
 ## 3. Errors and weaknesses
 
@@ -106,6 +132,42 @@ The `helix_` key is rejected by `launchverse.app/api/v1/me`. Two credentials and
 for one product is an integration trap, and it is what produced the earlier incorrect
 "no inference endpoint" conclusion.
 
+### 3.6 Output is not deterministic even at `temperature: 0`
+
+Two identical weak-evidence requests to `helix-advisor` with `temperature: 0` returned
+different things:
+
+- First: the expected bare JSON — `{"category":"other","confidence":15,"rationale":"…"}`
+- Second: prose — *"The classification is complete — the evidence was too weak…"*
+
+So even the recommended model is not reliably JSON-only. `response_format: json_object` does
+not prevent this (§3.4). For REACH this means the second opinion is inherently intermittent:
+the engine's own result stands and the model column sometimes reads `none`. That is a safe
+degradation, but it should not be presented as a guaranteed feature.
+
+### 3.7 Recommended hardening: extract the leading JSON object
+
+Because correct JSON arrives **first** and any trailing text is model commentary, the adapter
+should tolerate trailing content instead of discarding a valid assessment:
+
+```ts
+// Take the leading {...} block: scan to the matching close brace, then parse that slice.
+const start = raw.indexOf('{');
+let depth = 0, end = -1;
+for (let i = start; i >= 0 && i < raw.length; i++) {
+  if (raw[i] === '{') depth++;
+  else if (raw[i] === '}' && --depth === 0) { end = i + 1; break; }
+}
+const obj = end > 0 ? JSON.parse(raw.slice(start, end)) : null;
+```
+
+Rejected alternative: keeping strict `JSON.parse` and accepting the lost assessments. It is
+the conservative choice, but it throws away a correct `category`/`confidence` on every
+agentic model and on roughly half of `helix-advisor` calls. A tolerant parse is safe here
+because the engine independently validates the result — `CATEGORIES.includes(obj.category)`
+and a finite numeric `confidence` are still enforced afterwards, and the engine decides
+regardless of what the model says.
+
 ## 4. A corrected prompt works
 
 The failure in §3.1 is fixable by prompt wording alone — no code change. Dropping the
@@ -134,15 +196,23 @@ second-opinion role; it just must not be asked to *be* REACH.
 
 End-to-end, the corrected prompt was verified against the live endpoint: strong fire
 evidence → `fire`/88, empty evidence → `other`/10 with a rationale explaining that there
-was nothing to classify. Both parsed and both stayed conservative.
+was nothing to classify.
+
+Across the four reachable models, on identical strong-fire input, every model that returned
+JSON agreed on the verdict — `helix-advisor` 90–92, `helix-autopilot` 86, `helix/swe-v1` 85,
+`helix/devops-v1` 85. The classifications are consistent; only the *wrapping* differs
+(§2.1) and, for `helix-advisor`, only the occasional prose turn (§3.6). Expect the model
+column to be populated on roughly half of calls, not every call.
 
 ### 4.1 The 20/day ceiling constrains a demo
 
-The Free tier allows **20 Helix queries per day**. Since every incident assessment that
-reaches the provider costs one query, a demo that classifies more than 20 incidents in a
-day will start seeing 429s. REACH degrades safely when that happens — the breaker opens and
-the deterministic engine keeps producing assessments with `model_agreement: 'none'` — but
-the model column will stop lighting up mid-demo.
+The Free tier allows **20 Helix queries per day**, resetting at 00:00 UTC. This is a
+**team-level** limit, not a per-key one — a second `helix_` key does not add headroom.
+Every incident assessment that reaches the provider costs one query, so a demo that
+classifies more than 20 incidents in a day will start seeing 429s. REACH degrades safely
+when that happens — the breaker opens and the deterministic engine keeps producing
+assessments with `model_agreement: 'none'` — but the model column will stop lighting up
+mid-demo.
 
 Mitigations, in order of preference:
 
@@ -161,8 +231,13 @@ Mitigations, in order of preference:
   silently. It has been replaced with a neutral, JSON-only prompt (`MODEL_SYSTEM_PROMPT` in
   `ai_provider.ts`), and `ai-engine.mjs` section G now pins both the prompt contract and the
   rejection of prose-as-200.
-- Only one model is usable on this key; the other four are scope-blocked or out of credit.
-  The Free tier allows 20 queries/day, so a live demo should budget for that.
+- **Use `helix-advisor`.** The agentic models (`helix-autopilot`, `helix/swe-v1`,
+  `helix/devops-v1`) return correct JSON followed by an agent work report, which the current
+  strict parse rejects; `helix-operator` is scope-blocked on both keys tested.
+- The second opinion is **intermittent by nature**: `response_format` is not enforced and
+  even `helix-advisor` occasionally answers in prose. Expect `model_agreement: 'none'` on a
+  meaningful share of calls, not an exception. Hardening the parse (§3.7) would raise the hit
+  rate but cannot make it certain.
 - Runtime AI for REACH remains the deterministic engine in `ai_engine.ts`. The external
   model is an optional second opinion and the engine abstains safely without it.
 

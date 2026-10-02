@@ -168,3 +168,9 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   its second opinion. Non-JSON prose is recorded via `aiLastFailure()` for diagnosis. Do not re-add
   "You are REACH …" framing, and do not point `REACH_AI_ENDPOINT` at a provider whose prompt contract
   has not been verified against the live endpoint (`ai-engine.mjs` section G pins both).
+- Launchverse model choice matters: the agentic Helix models (`helix-autopilot`, `helix/swe-v1`,
+  `helix/devops-v1`) return the correct JSON object **followed by an agent work report** ("## Delivery
+  …"), so the strict parse rejects a valid assessment. `helix-operator` is scope-blocked. Use
+  `helix-advisor`, which returns bare JSON. Even so the second opinion is intermittent — `helix-advisor`
+  sometimes answers in prose at `temperature: 0` — so `model_agreement: 'none'` is normal, not a bug.
+  See `docs/HELIX_API_TEST_NOTES.md` §2.1, §3.6, §3.7.
