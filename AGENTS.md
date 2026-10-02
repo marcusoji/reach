@@ -160,3 +160,11 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   (or the item dropped), never allowed to become `NaN`. NaN in the fusion math nulls `confidence`,
   `margin` and `evidence_strength`, which silences every abstention blocker and yields a bogus
   `decision:'recommend'` with a NaN fingerprint. `ai-engine.mjs` section E pins this.
+- `ai_provider.ts`'s system prompt is deliberately identity-neutral (`MODEL_SYSTEM_PROMPT`): it states
+  the JSON contract and safety limits but never claims a role. A provider that does not recognise a
+  claimed identity can *refuse* it and answer in prose with **HTTP 200** (observed with Helix, which
+  replied "I'm Helix, a software-engineering agent, so I can't take on the REACH Safety Assist role").
+  That is a silent failure — `JSON.parse` throws, the breaker opens, and the model column quietly loses
+  its second opinion. Non-JSON prose is recorded via `aiLastFailure()` for diagnosis. Do not re-add
+  "You are REACH …" framing, and do not point `REACH_AI_ENDPOINT` at a provider whose prompt contract
+  has not been verified against the live endpoint (`ai-engine.mjs` section G pins both).

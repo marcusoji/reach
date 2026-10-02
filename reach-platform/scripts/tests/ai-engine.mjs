@@ -382,7 +382,7 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
 {
   // Deno.env is read at module load (breaker/timeout config), so the stub must exist first.
   globalThis.Deno = { env: { get: () => undefined } };
-  const { modelAssist, aiCircuitSnapshot, resetAiCircuit } = await loadTs('ai_provider.ts');
+  const { modelAssist, aiCircuitSnapshot, resetAiCircuit, aiLastFailure, MODEL_SYSTEM_PROMPT } = await loadTs('ai_provider.ts');
   const realFetch = globalThis.fetch;
   const setEnv = (o) => { globalThis.Deno = { env: { get: (k) => o[k] } }; };
   const okResponse = (obj) => ({ ok: true, json: async () => obj });
@@ -405,6 +405,33 @@ S('G. Provider adapter (fetch stubbed at the HTTP boundary)');
     ck('parses a well-formed provider response', r && r.category === 'fire' && r.confidence === 88 && r.model === 'm');
     ck('reports latency_ms', r && Number.isFinite(r.latency_ms));
   }
+
+  // The system prompt must not claim an agent identity. A provider that does not recognise the role
+  // can refuse it and answer in prose with HTTP 200 - observed live with Helix/Launchverse, which
+  // replied "I'm Helix, a software-engineering agent, so I can't take on the REACH Safety Assist
+  // role...". That is a silent failure: JSON.parse throws, the breaker opens, and /status reports the
+  // AI provider unhealthy. Pin the contract instead.
+  ck('system prompt does not claim an agent identity', !/\b(you are|act as|you're)\b/i.test(MODEL_SYSTEM_PROMPT));
+  ck('system prompt demands a bare JSON object', /single JSON object/i.test(MODEL_SYSTEM_PROMPT) && /no prose/i.test(MODEL_SYSTEM_PROMPT));
+
+  // A refusal or billing notice served as 200 with prose is a failure, not an assessment.
+  fresh();
+  globalThis.fetch = async () => okResponse({ choices: [{ message: { content: "I'm Helix, a software-engineering agent, so I can't take on the REACH Safety Assist role or classify emergency evidence." } }] });
+  ck('prose served as 200 is rejected', (await modelAssist({ evidence: [] })) === null);
+  ck('prose rejection is recorded for diagnosis', /software-engineering agent/.test(aiLastFailure()), aiLastFailure().slice(0, 60));
+
+  fresh();
+  globalThis.fetch = async () => okResponse({ choices: [{ message: { content: 'Helix credit balance exhausted. Top up to continue.' } }] });
+  ck('billing notice served as 200 is rejected', (await modelAssist({ evidence: [] })) === null);
+  ck('billing notice is recorded for diagnosis', /credit balance/i.test(aiLastFailure()));
+
+  fresh();
+  globalThis.fetch = async () => okResponse({ choices: [{ message: { content: JSON.stringify({ category: 'fire', confidence: 70 }) } }] });
+  {
+    const r = await modelAssist({ evidence: [] });
+    ck('a successful call clears the recorded failure', r?.category === 'fire' && aiLastFailure() === '');
+  }
+
   globalThis.fetch = async () => okResponse({ output: { category: 'medical', confidence: 40, rationale: 'r', evidence_labels: [] } });
   ck('accepts {output:{...}} shape', (await modelAssist({ evidence: [] }))?.category === 'medical');
 

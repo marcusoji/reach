@@ -62,18 +62,30 @@ prompt, it **refuses the task and returns prose instead of JSON**:
 This is the single most important finding for REACH. The response is valid HTTP 200 with a
 plausible-looking completion, so it fails **silently**: `ai_provider.ts` does
 `JSON.parse(content)`, which throws, so `modelAssist` returns `null` through its failure
-path and increments the circuit breaker. Five such calls open the breaker
-(`REACH_AI_BREAKER_THRESHOLD`), after which REACH's own `/status` health check reports the
-AI provider unhealthy — during a demo.
+path and increments the circuit breaker. After five such calls the breaker opens and the
+model column silently loses its second opinion.
+
+Note that this degradation is **not surfaced**: the `/status` health check reports the AI
+provider from environment variables alone (`'Configured'` / `'Not configured'`), so it keeps
+saying `Configured` while every call is failing. A breaker-aware health check would be a
+worthwhile follow-up.
 
 Naming REACH in the system prompt is what triggers it. A neutral prompt that describes the
 output format without claiming an identity works (see §4).
 
-### 3.2 Quota exhaustion is reported as success
+### 3.2 Quota exhaustion is reported inconsistently
 
-Exhausted credit returns **HTTP 200** with the completion text
+Exhausted **credit** returns **HTTP 200** with the completion text
 `"Helix credit balance exhausted. Top up to continue."` No error status, no error code.
-A client that only checks the status code treats a billing failure as a model answer.
+
+Exhausted **daily query allowance** is different — and inconsistent with the above: it
+returns **429** with `"Daily Helix query limit reached (20/day on Free Helix access).
+Resets at 00:00 UTC."`, carrying the same `insufficient_quota` code as a model-scope
+failure (§3.3).
+
+The Free-tier ceiling is therefore **20 Helix queries per day**, resetting at 00:00 UTC.
+Two different exhaustion conditions are reported in two different ways, and the error code
+is shared with a permissions failure.
 
 ### 3.3 A scope failure is mislabelled as a quota failure
 
@@ -120,18 +132,55 @@ Both parsed as JSON and both were conservative — the weak case correctly dropp
 `other` at 10 rather than confirming the reported fire. The model is usable for REACH's
 second-opinion role; it just must not be asked to *be* REACH.
 
+End-to-end, the corrected prompt was verified against the live endpoint: strong fire
+evidence → `fire`/88, empty evidence → `other`/10 with a rationale explaining that there
+was nothing to classify. Both parsed and both stayed conservative.
+
+### 4.1 The 20/day ceiling constrains a demo
+
+The Free tier allows **20 Helix queries per day**. Since every incident assessment that
+reaches the provider costs one query, a demo that classifies more than 20 incidents in a
+day will start seeing 429s. REACH degrades safely when that happens — the breaker opens and
+the deterministic engine keeps producing assessments with `model_agreement: 'none'` — but
+the model column will stop lighting up mid-demo.
+
+Mitigations, in order of preference:
+
+1. Set `REACH_AI_BREAKER_THRESHOLD` low (e.g. 3) so a demo degrades predictably rather than
+   after 5 failures.
+2. Spend queries deliberately — rehearse the exact incidents that will be shown, and prefer
+   pre-recorded evidence over live random classification.
+3. If a larger allowance is needed, check whether the Launchverse plan can be raised; the
+   20/day figure is a Free-tier limit, not an API limit.
+
 ## 5. Conclusion
 
 - Launchverse inference **does** work, via `helix_…` on `api.launchverse.app`, and
   `helix-advisor` is capable of the classification task.
-- REACH's **current** `modelAssist` system prompt is incompatible with Helix and fails
-  silently, then trips the AI circuit breaker. Do not point `REACH_AI_ENDPOINT` at
-  Launchverse until the prompt is reworded as in §4.
+- REACH's **old** `modelAssist` system prompt was incompatible with Helix and failed
+  silently. It has been replaced with a neutral, JSON-only prompt (`MODEL_SYSTEM_PROMPT` in
+  `ai_provider.ts`), and `ai-engine.mjs` section G now pins both the prompt contract and the
+  rejection of prose-as-200.
 - Only one model is usable on this key; the other four are scope-blocked or out of credit.
+  The Free tier allows 20 queries/day, so a live demo should budget for that.
 - Runtime AI for REACH remains the deterministic engine in `ai_engine.ts`. The external
   model is an optional second opinion and the engine abstains safely without it.
 
-## 6. Follow-ups for Launchverse
+## 6. Wiring Launchverse as `REACH_AI_ENDPOINT`
+
+If the second opinion is wanted at runtime, the configuration is:
+
+```
+REACH_AI_ENDPOINT=https://api.launchverse.app/api/v1/chat/completions
+REACH_AI_API_KEY=<helix_ key>          # server-side secret only
+REACH_AI_MODEL=helix-advisor
+REACH_AI_BREAKER_THRESHOLD=3           # optional; fail over sooner than the default 5
+```
+
+These are Edge Function secrets (`Deno.env`), never `VITE_` variables. The engine continues
+to decide; the model only contributes a second opinion and can never force a `recommend`.
+
+## 7. Follow-ups for Launchverse
 
 1. Return a non-2xx status when credit is exhausted, instead of 200 plus prose.
 2. Use a permissions error code for a model-scope failure, not `insufficient_quota`.
