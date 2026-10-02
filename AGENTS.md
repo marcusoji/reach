@@ -95,3 +95,16 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   reachable, so a local run without Postgres is not a failure.
 - The AI fusion logic lives only in `ai_engine.ts`; the SQL migrations just store assessments
   (`store_ai_assessment_for_incident`) and do not reimplement scoring.
+- `assessEvidence` returns `decision_basis: {signals, blockers}`. `blockers` is the exact list of
+  abstention triggers (`no_usable_evidence`, `confidence_below_threshold`,
+  `category_margin_below_threshold`, `evidence_strength_below_threshold`,
+  `contradiction_penalty_above_threshold`, `model_disagreement`) and `abstain` is exactly
+  `blockers.length > 0`. Prefer it over substring-matching the prose in `reasons`; the handler also
+  stores it in the assessment metadata. `ai-engine.mjs` asserts the two never drift.
+- Evidence with `corroborates:false` is counter-evidence: it adds to the contradiction penalty and
+  contributes no support and no category score. It used to be discounted support (x0.45) that still
+  raised confidence.
+- The PWA relay queue (`flushRelayQueue` in `js/backend.js`) drops packets past their own TTL
+  (`packet.e`), backs off exponentially and dead-letters after 8 attempts, and refuses to queue past
+  50 live rows. It previously retried every 30s forever with no expiry. `scripts/tests/pwa-relay-queue.mjs`
+  drives the real queue under a minimal in-memory IndexedDB and is in CI via `npm run test:pwa-relay`.

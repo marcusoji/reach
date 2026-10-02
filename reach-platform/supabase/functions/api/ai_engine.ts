@@ -29,8 +29,12 @@ export function assessEvidence(input:{reportedCategory?:string;userConfirmed?:bo
     // push the decision to 'recommend'.
     if(e.contradiction){contradiction+=w;continue;}
     const contribution=w*c;
+    // A source that marks its own item as not corroborating is counter-evidence, not weak
+    // support. It used to be merely discounted (x0.45) while still raising support and its
+    // category score, so "corroborates:false" items could still increase confidence.
+    if(e.corroborates===false){contradiction+=contribution*.5;continue;}
     support+=contribution; if(e.source)independentSources.add(e.source);
-    if(e.category&&CATEGORIES.includes(e.category as Category)) scores[e.category as Category]+=contribution*(e.corroborates===false?.45:1);
+    if(e.category&&CATEGORIES.includes(e.category as Category)) scores[e.category as Category]+=contribution;
   }
   if(input.reportedCategory&&CATEGORIES.includes(input.reportedCategory as Category)) scores[input.reportedCategory as Category]+=input.userConfirmed===true?.45:.22;
   const ranked=(Object.entries(scores) as [Category,number][]).sort((a,b)=>b[1]-a[1]);
@@ -46,7 +50,20 @@ export function assessEvidence(input:{reportedCategory?:string;userConfirmed?:bo
     if(modelAgreement==='disagree' && input.modelAssist.confidence>=.8) reasons.push('Independent model disagrees with the deterministic evidence ranking; assessment is downgraded.');
   }
   const confidence=Math.round(clamp(sigmoid((raw-.45)*7))*10000)/100;
-  const abstain=confidence<60 || margin<.55 || evidenceStrength<.16 || contradictionPenalty>.18 || (modelAgreement==='disagree'&&confidence<78);
+  // Machine-readable abstention trace. Substring-matching the human-readable reasons to learn
+  // *why* the engine abstained is brittle; consumers get the exact trigger list here instead.
+  const blockers:string[]=[];
+  if(evidence.length===0)blockers.push('no_usable_evidence');
+  if(confidence<60)blockers.push('confidence_below_threshold');
+  if(margin<.55)blockers.push('category_margin_below_threshold');
+  if(evidenceStrength<.16)blockers.push('evidence_strength_below_threshold');
+  if(contradictionPenalty>.18)blockers.push('contradiction_penalty_above_threshold');
+  if(modelAgreement==='disagree'&&confidence<78)blockers.push('model_disagreement');
+  const abstain=blockers.length>0;
+  const decision_basis={
+    signals:{margin:Math.round(margin*1000)/1000,evidence_strength:Math.round(evidenceStrength*100)/100,contradiction_penalty:Math.round(contradictionPenalty*100)/100,source_diversity:independentSources.size,model_agreement:modelAgreement,human_confirmation:input.userConfirmed===true},
+    blockers
+  };
   if(input.userConfirmed===true)reasons.push('Citizen confirmation is present.');
   if(input.corroboratingReports)reasons.push(`${input.corroboratingReports} corroborating report(s) found.`);
   if(input.locationAccuracyM!=null)reasons.push(`Location accuracy recorded at approximately ${Math.round(input.locationAccuracyM)}m.`);
@@ -57,6 +74,6 @@ export function assessEvidence(input:{reportedCategory?:string;userConfirmed?:bo
   return {
     model_name:'REACH-Safety-Fusion-v2',category,confidence,fp_code:`FP2-${category.toUpperCase()}-${Math.round(confidence)}-${Math.round(margin*100)}`,
     decision:abstain?'assist':'recommend',abstain,evidence_strength:Math.round(evidenceStrength*100)/100,margin:Math.round(margin*1000)/1000,
-    contradiction_penalty:Math.round(contradictionPenalty*100)/100,source_diversity:independentSources.size,model_agreement:modelAgreement,urgency,reasons,explanation:reasons.join(' ')
+    contradiction_penalty:Math.round(contradictionPenalty*100)/100,source_diversity:independentSources.size,model_agreement:modelAgreement,urgency,reasons,decision_basis,explanation:reasons.join(' ')
   };
 }

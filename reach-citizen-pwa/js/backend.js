@@ -19,6 +19,10 @@ const QUEUE_MAX_ATTEMPTS = 8;
 
 const QUEUE_MAX_ITEMS = 100;
 const QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
+// Relay packets carry their own expiry (`e`). A packet past it can never be accepted by the
+// gateway, so it is dropped rather than retried; failed sends back off and dead-letter.
+const RELAY_QUEUE_MAX_ATTEMPTS = 8;
+const RELAY_QUEUE_MAX_ITEMS = 50;
 const backendConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export { backendConfigured };
 
@@ -73,19 +77,50 @@ export async function createIncident(payload,idempotencyKey){const result=await 
 /** Upload a signed relay packet to the gateway (connected path, no radio hop). */
 export async function sendRelayPacket(packet){const result=await api('/relay/packets',{method:'POST',body:JSON.stringify(toServerPacket(packet,'pwa'))});return result.data;}
 
-/** Flush signed relay packets queued while offline. Each item holds {id,packet}. */
+/** Flush signed relay packets queued while offline. Each item holds {id,packet}.
+ * A packet whose own TTL (`packet.e`) has passed is discarded; a send that fails backs off
+ * with exponential delay and dead-letters after RELAY_QUEUE_MAX_ATTEMPTS instead of being
+ * retried every 30s forever. */
 export async function flushRelayQueue(){
+  if(!navigator.onLine || !hasSession()) return {sent:0,remaining:0,dead:0,expired:0};
   const db=await openDb();
   let items=[];
-  try{ items=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}); }catch{ return {sent:0,remaining:0}; }
-  let sent=0;
-  for(const item of items){
-    try{ await sendRelayPacket(item.packet); await new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).delete(item.id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);}); sent++; }
-    catch{ /* keep for the next flush */ }
+  try{ items=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}); }catch{ return {sent:0,remaining:0,dead:0,expired:0}; }
+  const remove=(id)=>new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).delete(id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
+  const put=(value)=>new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
+  let sent=0, dead=0, expired=0;
+  for(const item of items.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))){
+    if(item.state==='dead_letter'){ dead++; continue; }
+    if(item.nextAttemptAt && item.nextAttemptAt>Date.now()) continue;
+    if(Date.now()>=Number(item.packet?.e||0)){ await remove(item.id); expired++; continue; }
+    try{ await sendRelayPacket(item.packet); await remove(item.id); sent++; }
+    catch(err){
+      const attempts=Number(item.attempts||0)+1;
+      const next={...item,attempts,lastError:String(err&&err.message||err).slice(0,300),nextAttemptAt:Date.now()+Math.min(120000,1000*Math.pow(2,attempts))};
+      if(attempts>=RELAY_QUEUE_MAX_ATTEMPTS){ next.state='dead_letter'; next.deadAt=Date.now(); dead++; }
+      await put(next);
+    }
   }
-  return {sent,remaining:items.length-sent};
+  const rows=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);});
+  return {sent,remaining:rows.filter(i=>i.state!=='dead_letter').length,dead,expired};
 }
-function queueRelayPacket(packet){return openDb().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).put({id:packet.k,packet,createdAt:Date.now()});tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);}));}
+function queueRelayPacket(packet){return openDb().then(db=>new Promise((resolve,reject)=>{
+  const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();
+  req.onsuccess=()=>{
+    const live=(req.result||[]).filter(i=>i.state!=='dead_letter');
+    if(live.length>=RELAY_QUEUE_MAX_ITEMS)return reject(new Error('Relay queue is full; reconnect to send pending relay packets.'));
+    const tx=db.transaction(RELAY_STORE,'readwrite');
+    tx.objectStore(RELAY_STORE).put({id:packet.k,packet,createdAt:Date.now(),attempts:0,state:'queued'});
+    tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);
+  };
+  req.onerror=()=>reject(req.error);
+}));}
+/** Relay dead letters, mirroring listDeadLetter for the incident queue. */
+export async function listRelayDeadLetter(){
+  const db=await openDb().catch(()=>null); if(!db) return [];
+  const rows=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}).catch(()=>[]);
+  return rows.filter(i=>i.state==='dead_letter');
+}
 export async function getIncident(id){return (await api(`/incidents/${encodeURIComponent(id)}`)).data;}
 export async function updateProfile(patch){return (await api('/me',{method:'PATCH',body:JSON.stringify(patch)})).data;}
 export async function queueIncident(payload,idempotencyKey){const db=await openDb();const now=Date.now();await purgeExpired(db,now);const items=await allQueuedFromDb(db);if(items.length>=QUEUE_MAX_ITEMS){throw new Error('Offline emergency queue is full; reconnect to send pending emergencies before creating another queued report.');}await put(db,{id:idempotencyKey,payload,idempotencyKey,createdAt:now,attempts:0,nextAttemptAt:now});}

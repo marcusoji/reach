@@ -776,7 +776,7 @@ Deno.serve(async (req) => {
         p_incident_id: incidentId, p_model_name: finalResult.model_name, p_category: finalResult.category,
         p_confidence: finalResult.confidence, p_fp_code: finalResult.fp_code, p_evidence_ids: [],
         p_explanation: finalResult.explanation, p_decision: finalResult.decision,
-        p_metadata: { evidence_strength: finalResult.evidence_strength, margin: finalResult.margin, abstain: finalResult.abstain, reasons: finalResult.reasons, model_used: finalResult.model_used, model_agreement: finalResult.model_agreement, urgency: finalResult.urgency } 
+        p_metadata: { evidence_strength: finalResult.evidence_strength, margin: finalResult.margin, abstain: finalResult.abstain, reasons: finalResult.reasons, decision_basis: finalResult.decision_basis, model_used: finalResult.model_used, model_agreement: finalResult.model_agreement, urgency: finalResult.urgency } 
       });
       if (error) throw error;
       return json({ data: { assessment: data, ...finalResult } }, 201);

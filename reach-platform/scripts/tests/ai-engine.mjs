@@ -117,7 +117,8 @@ S('B. Category classification');
 
 // ---------------------------------------------------------------- C: invariants
 S('C. Invariants and output shape');
-const REQUIRED = ['model_name','category','confidence','fp_code','decision','abstain','evidence_strength','margin','contradiction_penalty','source_diversity','model_agreement','urgency','reasons','explanation'];
+const REQUIRED = ['model_name','category','confidence','fp_code','decision','abstain','evidence_strength','margin','contradiction_penalty','source_diversity','model_agreement','urgency','reasons','explanation','decision_basis'];
+const BLOCKERS = ['no_usable_evidence','confidence_below_threshold','category_margin_below_threshold','evidence_strength_below_threshold','contradiction_penalty_above_threshold','model_disagreement'];
 {
   const r = assessEvidence({ evidence: [] });
   const missing = REQUIRED.filter((k) => !(k in r));
@@ -127,6 +128,44 @@ const REQUIRED = ['model_name','category','confidence','fp_code','decision','abs
   ck('reasons always mention human verification', r.reasons.some((s) => /human verification/i.test(s)));
   ck('model_name stable', r.model_name === 'REACH-Safety-Fusion-v2');
   ck('fp_code format FP2-<CAT>-<conf>-<margin>', /^FP2-[A-Z]+-\d+-\d+$/.test(r.fp_code), r.fp_code);
+  // decision_basis gives consumers an exact reason instead of matching prose.
+  ck('decision_basis exposes signals and blockers', r.decision_basis && typeof r.decision_basis.signals === 'object' && Array.isArray(r.decision_basis.blockers));
+  ck('empty evidence reports the no_usable_evidence blocker', r.decision_basis.blockers.includes('no_usable_evidence'));
+  ck('abstain iff at least one blocker', r.abstain === (r.decision_basis.blockers.length > 0));
+  ck('every blocker is a known label', r.decision_basis.blockers.every((b) => BLOCKERS.includes(b)), r.decision_basis.blockers.join(','));
+}
+{
+  // decision_basis must stay consistent with abstain across a fuzz run, and the signals must
+  // mirror the top-level fields so downstream audit cannot read two different stories.
+  let inconsistent = 0, mismatched = 0;
+  const kinds = ['user_report','image','audio','motion','location','corroboration','relay','sensor','text'];
+  for (let i = 0; i < 300; i++) {
+    const n = i % 6;
+    const evidence = Array.from({ length: n }, (_, j) => ({
+      id: `d${i}-${j}`, kind: kinds[(i + j) % kinds.length], category: ['fire','medical','other'][(i + j) % 3],
+      confidence: ((i * 7 + j * 13) % 100) / 100, quality: ((i * 3 + j) % 100) / 100,
+      source: `s${(i + j) % 4}`, timestamp: at((i + j) * 4000), contradiction: (i + j) % 5 === 0,
+    }));
+    const r = assessEvidence({ reportedCategory: ['fire','medical',undefined][i % 3], userConfirmed: i % 4 === 0, corroboratingReports: i % 3, evidence });
+    if (r.abstain !== (r.decision_basis.blockers.length > 0)) inconsistent++;
+    if (r.margin !== r.decision_basis.signals.margin || r.evidence_strength !== r.decision_basis.signals.evidence_strength || r.contradiction_penalty !== r.decision_basis.signals.contradiction_penalty) mismatched++;
+  }
+  ck('fuzz: abstain matches blockers exactly', inconsistent === 0, `${inconsistent} violations`);
+  ck('fuzz: decision_basis signals mirror top-level fields', mismatched === 0, `${mismatched} violations`);
+}
+{
+  // corroborates:false is counter-evidence. It must lower confidence rather than being
+  // discounted support that still raises the category score.
+  const strong = (corroborates) => assessEvidence({ evidence: [
+    { id: 'a', kind: 'user_report', category: 'fire', confidence: 0.9, quality: 1, source: 'c1', timestamp: at(20_000) },
+    { id: 'b', kind: 'image', category: 'fire', confidence: 0.85, quality: 1, source: 'cam', timestamp: at(15_000), corroborates },
+  ] });
+  const yes = strong(true), no = strong(false);
+  ck('corroborates:false lowers confidence vs corroborates:true', no.confidence < yes.confidence, `${yes.confidence} -> ${no.confidence}`);
+  ck('corroborates:false raises the contradiction penalty', no.contradiction_penalty > 0);
+  ck('a single corroborates:false item alone cannot recommend', assessEvidence({ evidence: [
+    { id: 'x', kind: 'image', category: 'fire', confidence: 1, quality: 1, source: 'cam', timestamp: at(1000), corroborates: false },
+  ] }).decision === 'assist');
 }
 {
   // fuzz: random evidence must never violate the core invariants

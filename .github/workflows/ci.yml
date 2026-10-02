@@ -23,6 +23,7 @@ jobs:
       - run: npm run validate:hardening
       - run: npm run test:ai
       - run: npm run test:relay
+      - run: npm run test:pwa-relay
       - run: npm run build
         env:
           VITE_REACH_DEMO_MODE: 'false'
