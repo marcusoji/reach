@@ -118,6 +118,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - `validate:migrations` executes every migration against Postgres+PostGIS and is now run in CI's
   `sql-migrations` job via a `postgis/postgis:16-3.4` service container. It skips (exit 0) when no server is
   reachable, so a local run without Postgres is not a failure.
+- Demo data: `scripts/seed-demo-data.sql` clears every REACH record and inserts one row per table for
+  the demo (password `ReachDemo!2026`, e.g. `admin@greenfield.reach.dev`, `ops@reach.dev`). It is
+  destructive, wrapped in one transaction, and idempotent. Run it manually — either paste it into the
+  Supabase SQL editor or dispatch `.github/workflows/seed-demo-data.yml`, which posts it through the
+  Supabase Management API using the repo's `SUPABASE_ACCESS_TOKEN`/`SUPABASE_PROJECT_ID` secrets. It
+  keeps the two canonical `ai_model_registry` rows from 0004 and only clears the demo row.
+- `auth.users` on real Supabase has columns the local bootstrap omits (`instance_id`, `aud`, `role`,
+  `email_confirmed_at`, `raw_app_meta_data`, `updated_at`) plus `auth.identities`. The seed writes them,
+  so testing it locally means adding those columns to the bootstrap DB first.
 - The AI fusion logic lives only in `ai_engine.ts`; the SQL migrations just store assessments
   (`store_ai_assessment_for_incident`) and do not reimplement scoring.
 - `assessEvidence` returns `decision_basis: {signals, blockers}`. `blockers` is the exact list of

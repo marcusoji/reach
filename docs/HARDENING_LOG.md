@@ -236,3 +236,43 @@ and the payer-creation path did not.
 409-body, and the regression guard that the internal id is never returned); raw
 sandbox reproduction confirmed `internal id -> 404` and `bmoniUserId -> 200` on the
 same user; esbuild bundles the Edge Function cleanly.
+
+## 0023 Payment signing: heal the stored BMONI id (BUG-5 follow-up)
+
+**Symptom.** The proposal route heals a stale `bmoni_user_id`, but `payment/sign`
+called `bmoni.signProposal(tx.bmoni_user_id, ...)` with the raw stored value. A
+`bmoni_transactions` row created before the 0022 fix could still carry the internal
+row id, so signing that proposal would `404` on the provider even though the proposal
+step had already repaired the account row.
+
+**Fix.** `payment/sign` now resolves the payer id through the account row (keyed on
+`institution_id`), probes it with `onboardingStatus`, and on a `404` heals it by email
+(`findBmoniUserIdByEmail`) — updating both `bmoni_transactions.bmoni_user_id` and
+`bmoni_institution_accounts.bmoni_user_id` — before signing. The probe only runs when
+the transaction id differs from the account id, so the common path stays a single
+provider call.
+
+## 0024 Demo data reset + seed
+
+**Context.** The hosted database had accumulated mixed-up test data from repeated
+manual signup/incident runs, which made every screen ambiguous for the pitch.
+
+**Deliverable.** `reach-platform/scripts/seed-demo-data.sql` clears every REACH data
+record (FK-safe order; schema untouched) and inserts exactly one representative row in
+every table, so each screen has something real to show. It is wrapped in a single
+transaction (a failure rolls the whole reset back), is idempotent (re-running returns
+the same known state), and ends with a per-table row-count summary. Demo sign-ins use
+the password `ReachDemo!2026` (`admin@greenfield.reach.dev`, `staff@…`, `desk@…`,
+`citizen@…`, `ops@reach.dev`, `superadmin@reach.dev`, plus a second institution
+`admin@northgate.reach.dev`). `ai_model_registry` keeps the two canonical rows from
+migration 0004 and only the demo row is cleared.
+
+`.github/workflows/seed-demo-data.yml` runs the script against the hosted project via
+the Supabase Management API, reusing the repo's existing `SUPABASE_ACCESS_TOKEN` and
+`SUPABASE_PROJECT_ID` secrets. It is `workflow_dispatch` only — never automatic —
+because it is destructive.
+
+**Verification.** Applied twice against a throwaway Postgres+PostGIS database with the
+full migration set (bootstrap + 0001–0021): every one of the 30 public tables reports
+at least one row, the second run reproduces the same counts, and RLS read checks pass
+for an institution admin and a super-admin.

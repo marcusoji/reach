@@ -803,8 +803,31 @@ Deno.serve(async (req) => {
       if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) return json({ error: 'Signature must be a 65-byte 0x-prefixed hexadecimal signature from the BMONI SDK' }, 422);
       const { data: tx, error } = await supabase.from('bmoni_transactions').select('*').eq('institution_id', profile.institution_id).eq('proposal_id', proposalId).single();
       if (error || !tx) return json({ error: 'BMONI payment proposal not found' }, 404);
-      const result = await bmoni.signProposal(tx.bmoni_user_id, proposalId, signature);
-      await requireService().from('bmoni_transactions').update({ status: 'pending', raw_response: { ...tx.raw_response, signResult: result } }).eq('id', tx.id);
+      // The proposal route heals the stored id, but a transaction created before that fix can
+      // still carry a stale/internal id, which 404s on the provider. Reuse the same heal here
+      // (via the account row, keyed on the institution) so signing cannot fail on a stored id
+      // that the proposal step would have repaired.
+      const { data: account } = await supabase.from('bmoni_institution_accounts')
+        .select('bmoni_user_id,metadata').eq('institution_id', profile.institution_id).maybeSingle();
+      const service = requireService();
+      const heal = (healed: string) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {});
+      const payerEmail = account?.metadata?.payer_email;
+      let signUserId = String(tx.bmoni_user_id);
+      if (payerEmail && signUserId !== String(account?.bmoni_user_id ?? '')) {
+        try { await bmoni.onboardingStatus(signUserId); }
+        catch (probeError: any) {
+          if (probeError?.status === 404) {
+            const healed = await findBmoniUserIdByEmail(payerEmail);
+            if (healed && healed !== signUserId) {
+              signUserId = healed;
+              await service.from('bmoni_transactions').update({ bmoni_user_id: healed }).eq('id', tx.id);
+              if (account?.bmoni_user_id) await heal(healed);
+            }
+          }
+        }
+      }
+      const result = await bmoni.signProposal(signUserId, proposalId, signature);
+      await service.from('bmoni_transactions').update({ status: 'pending', raw_response: { ...tx.raw_response, signResult: result } }).eq('id', tx.id);
       return json({ data: result });
     }
 
