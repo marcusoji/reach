@@ -200,7 +200,7 @@ Deno.serve(async (req) => {
     } catch (error) {
       // Inbox retained; provider may retry. processing_error set inside RPC when possible.
       await service.from('bmoni_webhook_events').update({
-        processing_error: String(error instanceof Error ? error.message : error).slice(0, 1000),
+        processing_error: String(error instanceof Error ? error.message : (error as any)?.message ?? error).slice(0, 1000),
         next_attempt_at: new Date(Date.now() + 60_000).toISOString(),
       }).eq('event_id', eventId).is('processed_at', null);
       return json({ error: 'Webhook processing failed; retry is required' }, 500);
@@ -646,9 +646,12 @@ Deno.serve(async (req) => {
       if (error || !account?.bmoni_user_id) return json({ error: 'Create the institution BMONI payer account first' }, 409);
       const body = await readJsonLimited(req);
       const personalInfo = body.personalInfo;
-      const addressDetails = body.addressDetails;
-      if (!personalInfo || !addressDetails) return json({ error: 'personalInfo and addressDetails are required' }, 422);
-      const result = await bmoni.updateKyc(account.bmoni_user_id, { personalInfo, addressDetails, ...(body.occupationCode ? { occupationCode: body.occupationCode } : {}) });
+      // BMONI rejects `addressDetails` outright ("property addressDetails should not exist")
+      // and expects a single `address` object with streetLine1/city/state/postalCode/
+      // countryCode -- not street/city/countryCode. Accept either client name, send `address`.
+      const address = body.address ?? body.addressDetails;
+      if (!personalInfo || !address) return json({ error: 'personalInfo and address are required' }, 422);
+      const result = await bmoni.updateKyc(account.bmoni_user_id, { personalInfo, address, ...(body.occupationCode ? { occupationCode: body.occupationCode } : {}) });
       return json({ data: result });
     }
 
@@ -727,7 +730,7 @@ Deno.serve(async (req) => {
         await service.from('payments').update({ provider_reference: String(proposalId) }).eq('id', paymentInsert.data.id);
         return json({ data: { transaction: update.data, proposal_id: String(proposalId), sign_payload: signPayload, signing: 'signTransactionHash', note: 'The raw 32-byte hash must be signed on the institution device using the BMONI Embedded SDK. Do not use EIP-191 for this step.' } }, 201);
       } catch (providerError) {
-        await service.from('bmoni_transactions').update({ status: 'failed', failure_reason: String(providerError instanceof Error ? providerError.message : providerError).slice(0,500) }).eq('id', intentInsert.data.id);
+        await service.from('bmoni_transactions').update({ status: 'failed', failure_reason: String(providerError instanceof Error ? providerError.message : (providerError as any)?.message ?? providerError).slice(0,500) }).eq('id', intentInsert.data.id);
         await service.from('payments').update({ status: 'failed' }).eq('id', paymentInsert.data.id);
         throw providerError;
       }
@@ -1014,11 +1017,44 @@ if (path === '/notifications' && req.method === 'GET') {
     return json({ error: 'Route not found' }, 404);
   } catch (error) {
     const correlationId = crypto.randomUUID();
-    console.error('REACH API request failed', { correlationId, error: error instanceof Error ? error.message : String(error) });
-    const message = error instanceof Error ? error.message : 'Request failed';
-    const knownClientError = /Authentication|required|Not permitted|denied|not found|already|Invalid|expired|Cannot|must be/i.test(message);
-    const providerStatus = Number((error as any)?.status);
-    const status = knownClientError ? 403 : (providerStatus >= 400 && providerStatus < 600 ? providerStatus : 500);
-    return json({ error: knownClientError ? message : (status >= 500 ? 'Request could not be completed' : message), correlation_id: correlationId }, status);
+    const e: any = error;
+    // Supabase PostgrestError is a plain object, not an Error instance, so `instanceof Error`
+    // alone dropped every RPC/DB rejection message and turned it into an opaque 500.
+    const rawMessage = e instanceof Error
+      ? e.message
+      : (typeof e?.message === 'string' ? e.message : (typeof e === 'string' ? e : ''));
+    const message = String(rawMessage || 'Request failed');
+    console.error('REACH API request failed', { correlationId, code: e?.code, error: message });
+
+    // Map database/PostgREST codes to the closest HTTP status. P0001 is a deliberate
+    // `raise exception` guard inside an RPC, so its message is safe to surface.
+    const code = String(e?.code || '');
+    const pgStatus: Record<string, number> = {
+      P0001: 400,      // raise_exception guard in an RPC
+      '23505': 409,    // unique_violation
+      '23503': 409,    // foreign_key_violation
+      '23514': 422,    // check_violation
+      '22P02': 422,    // invalid_text_representation
+      '42501': 403,    // insufficient_privilege
+      PGRST116: 404,   // no rows returned for .single()
+      PGRST301: 401,   // JWT expired/invalid
+    };
+    const embedded = Number(e?.status ?? e?.statusCode);
+    let status = pgStatus[code]
+      ?? (embedded >= 400 && embedded < 600 ? embedded : undefined);
+
+    if (!status) {
+      if (/Authentication required|jwt|token|unauthor/i.test(message)) status = 401;
+      else if (/Not permitted|denied|insufficient|forbidden|role required/i.test(message)) status = 403;
+      else if (/not found/i.test(message)) status = 404;
+      else if (/already|duplicate|conflict/i.test(message)) status = 409;
+      else if (/Invalid|required|expired|Cannot|must be|not an active|not eligible|not configured|mismatch/i.test(message)) status = 422;
+      else status = 500;
+    }
+
+    // Deliberate guard messages (P0001) and every 4xx are caller-facing; only unexpected 5xx
+    // failures are hidden behind a generic message so internals never leak.
+    const surface = code === 'P0001' || status < 500;
+    return json({ error: surface ? message : 'Request could not be completed', correlation_id: correlationId }, status);
   }
 });
