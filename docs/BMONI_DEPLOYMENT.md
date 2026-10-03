@@ -25,8 +25,22 @@
 
 `BMONI_BASE_URL` (`https://embedded-dev.bmoni.com`) and `BMONI_API_KEY` are already
 set on the hosted function, so `GET /institution/billing/bmoni` reports
-`configured: true` and user creation reaches the sandbox. Two secrets are still
-required before the **Pay** step can prepare a transfer proposal:
+`configured: true` and user creation reaches the sandbox.
+
+**Pay works with no extra configuration.** The transfer destination and the price
+are both server-controlled and have working fallbacks, so a demo with no separate
+treasury wallet still completes:
+
+- **Destination** — `REACH_BMONI_TREASURY_ADDRESS` when set; otherwise the
+  institution's own CNGN smart wallet (`bmoni_institution_accounts.wallet_address`),
+  which makes the proposal a self-transfer that BMONI signs and settles the same
+  way. A client can never name the destination.
+- **Amount** — `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` when set (plain
+  decimal, e.g. `14500`, not wei); otherwise the built-in default
+  `DEFAULT_SUBSCRIPTION_AMOUNT_CNGN` (`14500`). A client can never name the amount.
+
+Setting both as Edge Function secrets (and redeploying) overrides the fallbacks
+and is still the right move for production:
 
 ```bash
 supabase secrets set REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN="<decimal CNGN price>"
@@ -34,16 +48,12 @@ supabase secrets set REACH_BMONI_TREASURY_ADDRESS="<0x destination wallet>"
 supabase functions deploy api
 ```
 
-- `REACH_BMONI_TREASURY_ADDRESS` is the REACH CNGN wallet that receives the
-  institutional subscription transfer. Without it the proposal route returns
-  `503 REACH BMONI treasury wallet is not configured`.
-- `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` is a plain decimal (e.g. `14500`),
-  not wei. Without it the proposal route returns `422 A valid institutional
-  subscription amount is required`.
+The `503 REACH BMONI treasury wallet is not configured` response can now only
+happen if the institution has neither a configured treasury nor a stored wallet
+address — i.e. wallet setup has not run yet.
 
-After both are set, sign in as `admin@northgate.reach.dev` (the seeded trial
-tenant) and run Configure BMONI → Create payer (Bunch Dillon persona, BVN
-`95888168924`) → wallet → KYC → Start Nigeria → Load NGN virtual account → Pay.
-The proposal signs on a BMONI-enabled device; the subscription flips to `active`
-when BMONI delivers the settlement webhook to
-`/functions/v1/api/webhooks/bmoni`.
+Sign in as `admin@northgate.reach.dev` (the seeded trial tenant) and run Configure
+BMONI → Create payer (Bunch Dillon persona, BVN `95888168924`) → wallet → KYC →
+Start Nigeria → Load NGN virtual account → Pay. The proposal signs on a
+BMONI-enabled device; the subscription flips to `active` when BMONI delivers the
+settlement webhook to `/functions/v1/api/webhooks/bmoni`.
