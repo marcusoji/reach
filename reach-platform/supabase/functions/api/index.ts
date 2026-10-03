@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0';
 import { assessEvidence } from './ai_engine.ts';
 import { modelAssist, aiLastFailure, aiLastFailureKind, aiCircuitSnapshot } from './ai_provider.ts';
-import { bmoni, bmoniConfigured } from './bmoni.ts';
+import { bmoni, bmoniConfigured, normalizePhone } from './bmoni.ts';
 import { verifyRelayBody } from './relay_verify.ts';
 
 const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
@@ -587,8 +587,9 @@ Deno.serve(async (req) => {
       const firstName = textValue(body.first_name, 80);
       const lastName = textValue(body.last_name, 80);
       const email = textValue(body.email, 254)?.toLowerCase();
-      const phoneNumber = textValue(body.phone_number, 30);
-      if (!firstName || !lastName || !email || !email.includes('@') || !phoneNumber) return json({ error: 'Authorized payer first name, last name, email and phone number are required' }, 422);
+      const phoneNumber = normalizePhone(body.phone_number);
+      if (!firstName || !lastName || !email || !email.includes('@')) return json({ error: 'Authorized payer first name, last name and email are required' }, 422);
+      if (!phoneNumber) return json({ error: 'Enter a valid phone number in E.164 format (for example +2348012345678).' }, 422);
       const { data: existingAccount } = await supabase.from('bmoni_institution_accounts').select('id,bmoni_user_id,onboarding_status').eq('institution_id', profile.institution_id).maybeSingle();
       if (existingAccount?.bmoni_user_id) return json({ data: existingAccount });
       let result: any;

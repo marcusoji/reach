@@ -96,6 +96,21 @@ Called with no body it returns `400`, listing the accepted values. The valid set
 observed was `id-only`, `id-and-liveness`, `idv-and-phone-verification`,
 `bmoni-monerium`. The documentation does not mention this parameter.
 
+### 2.4 `POST /v1/users` requires an E.164 `phoneNumber`
+
+A phone number without a country code is rejected with a bare
+`400 { "message": "Validation failed" }` — no field named, so it reads like a server
+fault. `+2348012345678` is accepted; `08012345678` is not. (`+2348000000000` is also
+accepted but already taken, so it returns `409`.)
+
+The Edge Function now normalises the payer phone to E.164 before the request
+(`normalizePhone` in `supabase/functions/api/bmoni.ts`): a `+`-prefixed number is
+kept, `234xxxxxxxxxx` and the local `0xxxxxxxxxx` form are converted to `+234…`, and
+anything else is refused with a `422` naming the expected shape rather than forwarded
+to BMONI to fail opaquely. The client also now joins BMONI's array-shaped
+`message` detail into the error string, because a validation failure lists the
+offending properties there.
+
 ## 3. Sandbox personas
 
 Only **Bunch Dillon** works reliably. Use that persona for all sandbox testing.

@@ -280,3 +280,14 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   reserved keyword — notably `current_role`, `current_user`, `session_user`, `user`, `current_schema`,
   `current_date`, `localtime` — or the variable will silently read the built-in value instead.
 
+
+- **BMONI answers a non-E.164 phone with a bare `400 Validation failed`.** In the institution billing
+  flow, `POST /institution/billing/bmoni/user` forwards the payer phone to BMONI `POST /v1/users`.
+  `+2348012345678` is accepted; `08012345678` is rejected with only `{ "message": "Validation failed" }`
+  — no field named, so it looks like a server fault rather than bad input. `normalizePhone`
+  (`supabase/functions/api/bmoni.ts`) converts the `+`/`234…`/local-`0…` shapes to E.164 and returns
+  `null` for anything else, which the endpoint turns into a `422` instead of a provider round-trip.
+  The BMONI client also joins the array-shaped `message` detail into the thrown error, because a
+  validation failure lists the offending properties there. `scripts/tests/bmoni-phone-normalize.mjs`
+  pins both behaviours (wired into `validate:all`).
+

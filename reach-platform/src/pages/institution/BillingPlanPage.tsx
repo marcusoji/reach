@@ -110,7 +110,7 @@ export const BillingPlanPage: React.FC = () => {
           <input className="reach-input" placeholder="Authorized payer first name" value={payer.first_name} onChange={e=>setPayer({...payer,first_name:e.target.value})}/>
           <input className="reach-input" placeholder="Authorized payer last name" value={payer.last_name} onChange={e=>setPayer({...payer,last_name:e.target.value})}/>
           <input className="reach-input" placeholder="Authorized payer email" value={payer.email} onChange={e=>setPayer({...payer,email:e.target.value})}/>
-          <input className="reach-input" placeholder="Phone number, E.164" value={payer.phone_number} onChange={e=>setPayer({...payer,phone_number:e.target.value})}/>
+          <input className="reach-input" placeholder="Phone number, e.g. +2348012345678" value={payer.phone_number} onChange={e=>setPayer({...payer,phone_number:e.target.value})}/>
           <Button variant="primary" disabled={busy} onClick={() => void run(async()=>{ await createInstitutionBmoniUser(payer); showToast('BMONI payer account created'); await refresh(); })}>1 · Create BMONI payer</Button>
           <input className="reach-input" placeholder="CNGN wallet address (from BMONI mobile SDK)" value={walletAddress} onChange={e=>setWalletAddress(e.target.value)}/>
           <Button variant="ghost" disabled={busy || !walletAddress} onClick={() => void run(async()=>{ const r=await createBmoniOwnerProofChallenge(walletAddress); setChallenge(r.data); showToast('Owner-proof challenge created'); })}>2 · Create owner-proof challenge</Button>

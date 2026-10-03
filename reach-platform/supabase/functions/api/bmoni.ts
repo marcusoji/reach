@@ -9,6 +9,22 @@ function requireConfigured() {
   if (!bmoniConfigured()) throw new Error('BMONI is not configured on the server');
 }
 
+/** Normalise a phone number to the E.164 shape BMONI requires.
+ *  A bare local number is assumed Nigerian (+234) — the sandbox and the NGN rail are
+ *  Nigeria-only and REACH's onboarding path is `start-nigeria` — rather than guessed.
+ *  Anything without a country code that is not a local Nigerian number is rejected,
+ *  because BMONI answers a non-E.164 number with a bare `400 Validation failed`. */
+export function normalizePhone(raw: unknown): string | null {
+  const input = String(raw ?? '').trim();
+  if (!input) return null;
+  const digits = input.replace(/\D/g, '');
+  if (!digits) return null;
+  if (input.startsWith('+')) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
+  if (digits.startsWith('234') && digits.length === 13) return `+${digits}`;
+  if (digits.startsWith('0') && digits.length === 11) return `+234${digits.slice(1)}`;
+  return null;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   requireConfigured();
   const controller = new AbortController();
@@ -25,7 +41,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let body: any = {};
   try { body = raw ? JSON.parse(raw) : {}; } catch { body = { raw }; }
   if (!response.ok) {
-    const providerMessage = typeof body?.message === 'string' ? body.message.slice(0, 240) : '';
+    // BMONI validation failures return the detail as an array (`message: ["property x should not exist"]`),
+    // not a string; stringify it so the cause survives to the caller instead of a bare "Validation failed".
+    const rawMessage = body?.message ?? body?.error;
+    const providerMessage = Array.isArray(rawMessage) ? rawMessage.join('; ').slice(0, 240)
+      : (typeof rawMessage === 'string' ? rawMessage.slice(0, 240) : '');
     const message = `BMONI request failed (${response.status})${providerMessage ? `: ${providerMessage}` : ''}`;
     const error = new Error(message);
     (error as any).status = response.status;
