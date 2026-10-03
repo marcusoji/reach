@@ -371,7 +371,14 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - **Sign-payload is prepared asynchronously.** After `approve`, `GET .../proposals/{id}/sign-payload`
   can return `409 Signing payload is not ready yet` for a few seconds; the route persists the
   proposal id first and retries on 409 (~24s). The sign step signs the **raw** `signingPayloadHash`
-  (`eth_account.unsafe_sign_hash`), not EIP-191.
+  (`eth_account.unsafe_sign_hash`), not EIP-191. Re-verified live: only the raw-hash signature is
+  accepted (`payment/sign` → 200, proposal `PENDING_SIGNATURES`); signing the returned EIP-712
+  `typedData` (both v=27 and v=0/1) or the hash via `personal_sign` each return
+  `400 Signature does not match your registered owner address`.
+- **One active subscription payment per institution.** The partial unique index
+  `bmoni_one_active_subscription_payment` covers `(institution_id, subscription_id)` while a
+  transaction is `initiated`/`pending`, so a second proposal returns a duplicate-key 409 until the
+  first reaches a terminal state. Failed/cancelled/reversed attempts do not block a retry.
 - **A signed proposal does not settle on an unfunded sandbox wallet.** The proposal reaches
   `PENDING_SIGNATURES` and the local payment stays `pending`; the subscription only flips to
   `active` on the BMONI settlement webhook (`process_bmoni_webhook_event`, statuses
