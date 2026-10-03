@@ -20,10 +20,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Pin the CLI instead of resolving "latest": a transient GitHub API error resolving
+      # "latest" fails the whole deploy before any step runs.
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.119.0
 
       - name: Link Supabase project
         run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}

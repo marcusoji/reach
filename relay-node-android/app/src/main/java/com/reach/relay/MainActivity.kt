@@ -1,5 +1,6 @@
 package com.reach.relay
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -115,6 +116,8 @@ class MainActivity : Activity() {
     }
 
     /** Ask the platform to switch the radios on. Android only *prompts* for Bluetooth and Wi-Fi. */
+    // Lint cannot see that relayPermissionsGranted() gates every permission use below.
+    @SuppressLint("MissingPermission")
     internal fun enableRadios() {
         if (!relayPermissionsGranted()) return
         val adapter = bluetoothManager.adapter
