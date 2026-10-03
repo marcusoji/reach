@@ -1,0 +1,8 @@
+# Supabase project configuration. `project_id` is written by `supabase link --project-ref <ref>`.
+
+[functions.api]
+# The /webhooks/bmoni route authenticates itself with an HMAC signature over the raw body,
+# not a Supabase JWT, and BMONI cannot send one. The default platform-level JWT check would
+# reject the webhook (and the unauthenticated /health probe) with 401 before the function
+# runs. Every other route still calls supabase.auth.getUser() and returns 401 without a user.
+verify_jwt = false

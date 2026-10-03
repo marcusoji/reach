@@ -8,6 +8,7 @@ const auth = read('src/context/AuthContext.tsx');
 const api = read('supabase/functions/api/index.ts');
 const bmoni = read('supabase/functions/api/bmoni.ts');
 const migration = read('supabase/migrations/0008_final_hardening.sql');
+const functionsConfig = read('supabase/config.toml');
 
 const checks = [
   ['backend signup does not require demo mode', auth.includes("if (isBackendConfigured) {\n        const session") && auth.indexOf("if (isBackendConfigured) {") < auth.indexOf("if (!isDemoMode) throw new Error('REACH backend is not configured');")],
@@ -20,6 +21,7 @@ const checks = [
   ['BMONI late failures cannot downgrade successful', migration.includes("current_tx_status in ('successful','reversed')")],
   ['single active institutional payment enforced', migration.includes('bmoni_one_active_subscription_payment')],
   ['system health performs database probes', api.includes("supabase.from('profiles').select('id', { head: true, count: 'exact' })")],
+  ['the Edge Function API disables platform JWT verification for the self-authenticating webhook', /\[functions\.api\][^[]*verify_jwt\s*=\s*false/.test(functionsConfig)],
 ];
 
 for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} - ${name}`);

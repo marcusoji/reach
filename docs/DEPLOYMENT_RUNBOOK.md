@@ -139,6 +139,16 @@ cd reach-platform
 supabase functions deploy api
 ```
 
+**JWT verification must stay disabled for this function.** `supabase/config.toml` sets
+`[functions.api] verify_jwt = false`, because the `/webhooks/bmoni` route authenticates itself with an
+HMAC signature over the raw body (BMONI cannot send a Supabase JWT). With the default
+`verify_jwt = true`, the platform rejects the webhook — and the unauthenticated `/health` probe — with
+`401 Invalid JWT` before the function ever runs. Every other route still calls `supabase.auth.getUser()`
+and returns 401 without a user. Confirm it after deploying: `curl -i https://YOUR_PROJECT.supabase.co/functions/v1/api/health`
+should return `200 {"ok":true,...}`; if it returns 401, the setting did not take — set it in the dashboard
+(Edge Functions → `api` → Settings → turn off "Enforce JWT Verification") or redeploy with
+`supabase functions deploy api --no-verify-jwt`.
+
 Then set its secrets. **These are server-side only — never put them in a
 `VITE_` variable or in `config.js`.**
 

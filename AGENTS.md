@@ -57,6 +57,11 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   now checks every `rpc()` argument name against the SQL signatures statically; `tests/bmoni_webhook_flow.sql`
   exercises the flow end-to-end on the migrated schema.
 - `text[]` literals need braces: `'{a,b}'`, not `'a,b'`.
+- Supabase Edge Functions default to `verify_jwt = true` at the platform edge, *before* the function
+  code runs. `supabase/functions/api/` serves a self-authenticating webhook (`/webhooks/bmoni` HMAC) and
+  an unauthenticated `/health` probe, so `supabase/config.toml` must keep `[functions.api] verify_jwt = false`
+  or every webhook gets `401 Invalid JWT` and no payment ever settles. `final-hardening.mjs` pins this.
+  The function still calls `supabase.auth.getUser()` on every non-webhook route and returns 401 without a user.
 - Granting execute to `authenticated` is intended; only `anon`/PUBLIC access is a defect.
 - `spatial_ref_sys` (PostGIS) is extension-owned and has RLS off by design.
 - Local bootstrap defines `auth.jwt()` (used by migrations `0009`+) alongside `auth.uid()`/`auth.role()`.
