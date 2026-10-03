@@ -28,7 +28,11 @@ values
   ('bbbbbbbb-0000-0000-0000-000000000001', 'citizen.b@example.test'),
   ('cccccccc-0000-0000-0000-000000000001', 'operator@example.test'),
   ('dddddddd-0000-0000-0000-000000000001', 'drifting.staff@example.test'),
-  ('eeeeeeee-0000-0000-0000-000000000001', 'drifting.desk@example.test')
+  ('eeeeeeee-0000-0000-0000-000000000001', 'drifting.desk@example.test'),
+  -- Two institution-less citizens. Their incidents carry institution_id = NULL, which is
+  -- exactly the shape that exposed the NULL-comparison evidence hole (migration 0021).
+  ('aaaaaaaa-0000-0000-0000-000000000004', 'citizen.d@example.test'),
+  ('aaaaaaaa-0000-0000-0000-000000000005', 'citizen.e@example.test')
 on conflict (id) do nothing;
 
 -- auth.users inserts fire handle_new_user, which already creates a minimal
@@ -45,7 +49,9 @@ values
   -- Anomalous accounts with no institution. These exercise the NULL-comparison
   -- guards in the authorization RPCs (migration 0012).
   ('dddddddd-0000-0000-0000-000000000001', 'Drifting Staff', 'staff',         null),
-  ('eeeeeeee-0000-0000-0000-000000000001', 'Drifting Desk',  'security-desk', null)
+  ('eeeeeeee-0000-0000-0000-000000000001', 'Drifting Desk',  'security-desk', null),
+  ('aaaaaaaa-0000-0000-0000-000000000004', 'Citizen D',  'citizen',       null),
+  ('aaaaaaaa-0000-0000-0000-000000000005', 'Citizen E',  'citizen',       null)
 on conflict (id) do update set
   full_name = excluded.full_name, role = excluded.role, institution_id = excluded.institution_id;
 
@@ -56,7 +62,10 @@ values
   ('b0000000-0000-0000-0000-00000000000b', '22222222-2222-2222-2222-222222222222',
    'bbbbbbbb-0000-0000-0000-000000000001', 'medical', 'reported', 'B medical'),
   ('a0000000-0000-0000-0000-00000000000c', '11111111-1111-1111-1111-111111111111',
-   'aaaaaaaa-0000-0000-0000-000000000001', 'security', 'verified', 'A verified incident')
+   'aaaaaaaa-0000-0000-0000-000000000001', 'security', 'verified', 'A verified incident'),
+  -- Institution-less incident (institution_id = NULL) reported by Citizen D.
+  ('d0000000-0000-0000-0000-00000000000d', null,
+   'aaaaaaaa-0000-0000-0000-000000000004', 'other', 'reported', 'D private report')
 on conflict (id) do nothing;
 
 insert into responders (id, user_id, institution_id, responder_type, duty_status)
@@ -431,5 +440,28 @@ begin
   end if;
 end $$;
 \echo 'PASS 18 - a valid capture attaches with the server-derived weight'
+
+-- 19) Regression for migration 0021: an unrelated citizen must not be able to attach evidence
+--     to another citizen's institution-less incident. `institution_id = NULL` matched because
+--     the old guard used `is distinct from`, which treats NULL vs NULL as "not distinct".
+do $$
+declare attached boolean := false;
+begin
+  set local role authenticated;
+  -- Citizen E (no institution) tries to attach to Citizen D's incident (institution_id = NULL).
+  perform set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000005', true);
+  begin
+    perform public.attach_incident_evidence(
+      'd0000000-0000-0000-0000-00000000000d', 'text', null, repeat('e', 64));
+    attached := true;
+  exception
+    when others then attached := false;
+  end;
+  reset role;
+  if attached then
+    raise exception 'FAIL 19: an unrelated citizen attached evidence to a NULL-institution incident';
+  end if;
+end $$;
+\echo 'PASS 19 - evidence cannot be attached to an unrelated institution-less incident'
 
 \echo '=== RLS isolation suite complete ==='
