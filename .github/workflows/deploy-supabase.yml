@@ -5,12 +5,16 @@ on:
     branches:
       - main
     paths:
-      - 'supabase/**'
+      - 'reach-platform/supabase/**'
       - '.github/workflows/deploy-supabase.yml'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: reach-platform
 
     steps:
       - name: Checkout repository
