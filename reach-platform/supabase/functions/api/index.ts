@@ -800,12 +800,28 @@ Deno.serve(async (req) => {
         const proposalId = proposal?.proposalId || proposal?.id || proposal?.proposal?.id;
         if (!proposalId) throw new Error('BMONI did not return a proposal id');
         await bmoni.approveProposal(bmoniUserId, String(proposalId));
-        const signPayload = await bmoni.proposalSignPayload(bmoniUserId, String(proposalId));
+        // Persist the proposal id before reading the sign payload: BMONI prepares the
+        // transfer asynchronously after approval, so sign-payload can 409 ("not ready yet")
+        // for a few seconds. Storing the id first lets a retry resume the same proposal
+        // instead of creating another one, and lets the client poll if the wait exceeds
+        // this request.
+        await service.from('bmoni_transactions').update({ proposal_id: String(proposalId), status: 'pending' }).eq('id', intentInsert.data.id);
+        await service.from('payments').update({ provider_reference: String(proposalId) }).eq('id', paymentInsert.data.id);
+        let signPayload: any = null;
+        let lastError: any = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          try { signPayload = await bmoni.proposalSignPayload(bmoniUserId, String(proposalId)); lastError = null; break; }
+          catch (error: any) {
+            lastError = error;
+            if (error?.status !== 409) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
+        }
+        if (!signPayload) throw lastError ?? new Error('BMONI did not prepare the signing payload');
         // BMONI returns the digest as signingPayloadHash; hashToSign/payload are documented
         // names it does not emit. Missing all three silently stored sign_payload as null.
-        const update = await service.from('bmoni_transactions').update({ proposal_id: String(proposalId), status: 'pending', sign_payload: signPayload?.signingPayloadHash || signPayload?.hashToSign || signPayload?.payload || null, raw_response: { proposal, signPayload } }).eq('id', intentInsert.data.id).select().single();
+        const update = await service.from('bmoni_transactions').update({ sign_payload: signPayload?.signingPayloadHash || signPayload?.hashToSign || signPayload?.payload || null, raw_response: { proposal, signPayload } }).eq('id', intentInsert.data.id).select().single();
         if (update.error) throw update.error;
-        await service.from('payments').update({ provider_reference: String(proposalId) }).eq('id', paymentInsert.data.id);
         return json({ data: { transaction: update.data, proposal_id: String(proposalId), sign_payload: signPayload, signing: 'signTransactionHash', note: 'The raw 32-byte hash must be signed on the institution device using the BMONI Embedded SDK. Do not use EIP-191 for this step.' } }, 201);
       } catch (providerError) {
         await service.from('bmoni_transactions').update({ status: 'failed', failure_reason: String(providerError instanceof Error ? providerError.message : (providerError as any)?.message ?? providerError).slice(0,500) }).eq('id', intentInsert.data.id);
