@@ -3,7 +3,13 @@
 -- schema, auth.uid()/auth.role(), the anon/authenticated/service_role roles, and the
 -- supabase_realtime publication.
 
-create extension if not exists pgcrypto;
+-- Supabase installs extensions into a dedicated `extensions` schema, NOT public, and its
+-- default search_path is `"$user", public, extensions`. Functions here pin
+-- `set search_path=public`, so an extension function called from inside one resolves only if
+-- the extension schema is also on the function's path. Installing pgcrypto in public (as this
+-- fixture used to) hides that whole class of production-only failure, so mirror Supabase.
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 create schema if not exists auth;
 
