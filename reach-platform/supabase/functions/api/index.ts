@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0';
 import { assessEvidence } from './ai_engine.ts';
 import { modelAssist, aiLastFailure, aiLastFailureKind, aiCircuitSnapshot } from './ai_provider.ts';
 import { bmoni, bmoniConfigured } from './bmoni.ts';
