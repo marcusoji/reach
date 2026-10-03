@@ -6,6 +6,41 @@ current status see [REACH_PRODUCTION_STATUS.md](./REACH_PRODUCTION_STATUS.md);
 for what still requires external verification see
 [EXTERNAL_CERTIFICATION.md](./EXTERNAL_CERTIFICATION.md).
 
+## Hosted-debug pass (0019–0021)
+
+Fixes found against the live hosted project, where several guard rails that the
+local fixtures could not exercise were silently broken.
+
+- **Staff invites returned 500 / redeem 422 (0019, 0020).** Two independent
+  faults. First, `create_staff_invite`/`redeem_staff_invite` declared
+  `p_role public.reach_role`, and PL/pgSQL lowered the parameter name to `role`,
+  colliding with the reserved word / the `profiles.role` column; 0019 renames it.
+  Second, both functions call `digest()` but pin `set search_path=public`, while
+  Supabase installs pgcrypto into the `extensions` schema. The `if not exists`
+  in 0001 was a no-op there, so the call failed with `42883 function
+  digest(text, unknown) does not exist` — 0020 adds `extensions` to the path.
+  The local bootstrap used to install pgcrypto in `public`, hiding this; it now
+  mirrors Supabase.
+- **API errors were opaque (index.ts).** The catch block only read a message
+  from `Error` instances. A Supabase `PostgrestError` is a plain object, so
+  every `raise exception` guard became a generic 500. The handler now reads the
+  message/code off any error shape and maps PostgREST/SQLSTATE codes to HTTP
+  statuses, surfacing caller-facing 4xx detail while keeping 5xx generic.
+- **BMONI KYC sent the wrong field.** The wrapper forwarded `addressDetails`,
+  which BMONI rejects; it expects a single `address` object.
+- **Evidence capture bypassed by a NULL institution (0021).**
+  `attach_incident_evidence` guarded with `institution_id is distinct from
+  current_institution_id()`. A citizen's incident is `institution_id = NULL` and
+  a citizen caller is `NULL`, so `NULL is distinct from NULL` is FALSE — the
+  guard passed for *any* authenticated user. Any signed-in citizen could attach
+  evidence (including the strongest image/audio/video weights) to, and read
+  back, an unrelated citizen's institution-less report. 0021 requires an
+  explicit non-NULL institution match for non-reporters; RLS assertion 19 pins
+  it. NOTE: this is the *opposite* direction from the 0012 rule for the `<>`
+  operator — `<>` needs NULL-safety to fail closed, a bare `is distinct from`
+  on a NOT-guard needs it too. Compare institution ids explicitly in both
+  shapes.
+
 ## Payment boundary (design invariant)
 
 Only institutions are billable. Residents/citizens, students, staff, security

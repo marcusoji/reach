@@ -150,6 +150,26 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `assign_incident`, `transition_assignment`, `create_institution_for_current_user` and
   `register_my_relay_device`; the suite's assertions 8–9 pin it. (`promote_current_user_to_operator`
   is redefined there too, but its ACL — revoked from `authenticated` by 0006 — must not be re-granted.)
+- `is distinct from` fails OPEN when it is the *negative* of the comparison. The same operator
+  that fixes a `<>` guard (where NULL must fail closed) is unsafe in a `NOT permitted` guard of
+  the shape `if reporter_id <> uid and institution_id is distinct from current_institution_id() ...`.
+  Two NULL institutions are "not distinct", so the middle term is FALSE and any authenticated user
+  passes. `0021_fix_evidence_authz_null_institution.sql` rewrites `attach_incident_evidence` to
+  compare institution ids explicitly (`inst is null or inst <> current`); assertion 19 in the RLS
+  suite seeds two institution-less citizens and pins it. When adding a NOT-guard, write the
+  comparison so that "no institution" fails — do not reach for `is distinct from` reflexively.
+- A Supabase `PostgrestError` is a **plain object**, not an `Error`. Any `error instanceof Error ?
+  error.message : error` yields `[object Object]`, and the Edge Function's catch block used to read a
+  message only from `Error` instances, turning every deliberate `raise exception` guard into an opaque
+  500. `index.ts` now reads `message`/`code`/`details` off any shape and maps PostgREST + SQLSTATE
+  codes to HTTP statuses. Keep error handling shape-agnostic.
+- Supabase installs extensions (pgcrypto, PostGIS) into the **`extensions` schema**, not `public`,
+  and its default `search_path` is `"$user", public, extensions`. A `security definer ... set
+  search_path=public` function cannot resolve `digest()`/`crypt()` unless `extensions` is also on its
+  path; 0001's `create extension if not exists pgcrypto` is a no-op there. `0020_fix_pgcrypto_search_path.sql`
+  adds `extensions` to the two invite RPCs. `scripts/tests/supabase-bootstrap.sql` now installs pgcrypto
+  into `extensions` so the local run reproduces this class of failure instead of hiding it. A broader
+  sweep for extension functions called from a pinned path is still open.
 - `tests/rls_tenant_isolation.sql` seeds profiles with an upsert, not `on conflict do nothing`:
   inserting `auth.users` fires `handle_new_user`, which already creates a `citizen`/NULL-institution
   profile, so a do-nothing insert is a silent no-op and the suite would run entirely as citizens.
