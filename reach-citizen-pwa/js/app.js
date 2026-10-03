@@ -69,8 +69,13 @@ function handleCategorySelect(rowElement) {
  */
 function handleLocationSelect(optionElement) {
   const locType = optionElement.dataset.locType || 'registered';
-  const labelEl = optionElement.querySelector('b');
-  const label = labelEl ? labelEl.textContent.trim() : 'Zone B';
+  const title = optionElement.querySelector('b')?.textContent.trim() || 'Zone B';
+  const zoneText = optionElement.querySelector('span')?.textContent.trim() || '';
+  // The registered row names the real zone in its subtitle ("Zone B — Hostel Block 4"); use that as
+  // the label so the report carries the zone the citizen picked, not the generic row title.
+  const label = locType === 'gps' ? 'Current GPS location'
+    : locType === 'manual' ? 'Manual zone'
+    : (zoneText || title);
 
   // Update UI selection
   $$('.loc-option').forEach(opt => opt.classList.remove('selected'));
@@ -81,7 +86,17 @@ function handleLocationSelect(optionElement) {
 
   // Update Confirm screen summary
   const confirmLoc = $('#confirmLocType');
-  if (confirmLoc) confirmLoc.textContent = label;
+  if (confirmLoc) confirmLoc.textContent = confirmLocationText();
+}
+
+/** What the Review screen shows for location: the actual fix when there is one, else the label. */
+function confirmLocationText() {
+  const e = appState.emergency;
+  if (e.locationType === 'gps' && e.latitude != null && e.longitude != null) {
+    const acc = e.locationAccuracyM != null ? ` ±${Math.round(e.locationAccuracyM)}m` : '';
+    return `${e.latitude.toFixed(5)}, ${e.longitude.toFixed(5)}${acc}`;
+  }
+  return e.locationLabel || 'Zone B';
 }
 
 /**
@@ -152,7 +167,7 @@ function init() {
   setupEventDelegation();
 
   // Subscribe to state changes if needed for global sync
-  subscribeState(state => { syncNetworkUi(state); syncProfileIntoHome(); });
+  subscribeState(state => { syncNetworkUi(state); syncProfileIntoHome(); syncLocationScreen(); });
 
   // Start on the splash screen
   navigateTo('splash');
@@ -274,13 +289,93 @@ async function flushCitizenQueue() {
   await flushQueue();
 }
 
-function requestGpsLocation() {
-  if (!navigator.geolocation) { alert('GPS is not available on this device.'); return; }
-  navigator.geolocation.getCurrentPosition(
-    position => { setGpsCoordinates(position.coords.latitude, position.coords.longitude, position.coords.accuracy); const text = document.querySelector('#locList [data-loc-type="gps"] span'); if (text) text.textContent = `Current location · ±${Math.round(position.coords.accuracy)}m`; },
-    () => { const text = document.querySelector('#locList [data-loc-type="gps"] span'); if (text) text.textContent = 'Unable to read GPS — choose another option'; },
-    { enableHighAccuracy:true, timeout:8000, maximumAge:30000 }
-  );
+/** The GPS row's live status text, so failures are shown in place rather than via alert(). */
+function setGpsOptionText(text) {
+  const span = document.querySelector('#locList [data-loc-type="gps"] span');
+  if (span) span.textContent = text;
+}
+
+/**
+ * Read the device location with a real user prompt.
+ *
+ * Two things make this fail in the field and are handled explicitly:
+ * - On iOS Safari (and anything without the Permissions API) a *denied* location grant can only be
+ *   reported through `getCurrentPosition`, which resolves nothing when a previously-denied caller
+ *   retries — so it is wrapped in a timeout instead of hanging on "Reading GPS…" forever.
+ * - `enableHighAccuracy` outdoors takes a long time to fix, so the first attempt is time-bounded and
+ *   falls back to a coarse network fix rather than leaving the citizen with no location at all.
+ *
+ * Nothing is written to state unless a fix is actually obtained, so a failed read never overwrites
+ * the registered/manual choice with null coordinates.
+ */
+function readGpsFix() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('unsupported')); return; }
+    let settled = false;
+    const finish = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+    const attempt = (options, onFail) => {
+      navigator.geolocation.getCurrentPosition(
+        position => finish(resolve, position),
+        error => onFail(error),
+        options,
+      );
+    };
+    // A denied/retried call may never invoke either callback, so cap the wait per attempt.
+    const watchdog = (ms, onTimeout) => setTimeout(() => onTimeout(), ms);
+    const coarse = () => {
+      const t = watchdog(12000, () => finish(reject, new Error('timeout')));
+      attempt({ enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }, error => {
+        clearTimeout(t);
+        finish(reject, error);
+      });
+    };
+    const t = watchdog(10000, coarse);
+    attempt({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }, error => {
+      clearTimeout(t);
+      if (error && error.code === 1) { finish(reject, error); return; } // permission denied — retrying is pointless
+      coarse();
+    });
+  });
+}
+
+/**
+ * GPS row tap: read a fix and show the real outcome.
+ *
+ * Tapping the row also selects it (the loc-list handler runs in the same click), so a *failed* read
+ * must fall back to the registered zone rather than leaving "GPS" selected with no coordinates — the
+ * report would otherwise claim a GPS source it never obtained.
+ */
+async function requestGpsLocation() {
+  const row = document.querySelector('#locList [data-loc-type="gps"]');
+  if (!navigator.geolocation) { setGpsOptionText('GPS not available on this device'); selectRegisteredFallback(); return; }
+  if (row?.classList.contains('locating')) return;
+  row?.classList.add('locating');
+  setGpsOptionText('Reading GPS…');
+
+  let position = null, error = null;
+  try { position = await readGpsFix(); } catch (e) { error = e; }
+  row?.classList.remove('locating');
+
+  // The citizen may have switched back to their registered zone while the fix was pending.
+  const stillChosen = row?.classList.contains('selected');
+
+  if (position) {
+    const { latitude, longitude, accuracy } = position.coords;
+    setGpsOptionText(`Current location · ±${Math.round(accuracy)}m — tap to use`);
+    // Writing the fix notifies subscribers, which refresh the Review summary via syncLocationScreen().
+    if (stillChosen) setGpsCoordinates(latitude, longitude, accuracy);
+    return;
+  }
+  setGpsOptionText(error?.code === 1
+    ? 'Location permission denied — allow it in your browser settings'
+    : 'Unable to read GPS — choose another option');
+  if (stillChosen) selectRegisteredFallback();
+}
+
+/** Drop back to the citizen's registered zone when GPS cannot be used. */
+function selectRegisteredFallback() {
+  const registered = document.querySelector('#locList [data-loc-type="registered"]');
+  if (registered) handleLocationSelect(registered);
 }
 
 async function renderContacts() {
@@ -399,6 +494,24 @@ async function trackActiveIncident() {
 function syncProfileIntoHome() {
   const greeting = document.querySelector('.greeting b');
   if (greeting) greeting.textContent = (appState.user.name || 'Citizen').split(' ')[0];
+}
+
+/** Show the citizen's registered zone on the location screen, and keep the Review summary current. */
+function syncLocationScreen() {
+  const zone = appState.user.registeredLocation;
+  const row = document.querySelector('#locList [data-loc-type="registered"]');
+  const span = row?.querySelector('span');
+  // The default is a placeholder, not a zone; only overwrite the static row once a real zone exists.
+  if (span && zone && zone !== 'Select your registered zone') span.textContent = zone;
+  // This runs from the state subscriber, so writing state here must be idempotent — otherwise the
+  // notify would re-enter this function forever.
+  const label = span?.textContent.trim() || zone || 'Zone B';
+  if (row?.classList.contains('selected') && appState.emergency.locationLabel !== label) {
+    setSelectedLocation('registered', label);
+    return; // the write already refreshed the summary via the subscriber
+  }
+  const confirmLoc = $('#confirmLocType');
+  if (confirmLoc) confirmLoc.textContent = confirmLocationText();
 }
 
 // --- Evidence capture on the review screen -------------------------------------------------
@@ -554,6 +667,7 @@ async function enhancedNavHandler(event) {
     setTimeout(() => { void enterRelayPermissionScreen(); }, 0);
   }
   if (target === 'contacts') { void renderContacts(); }
+  if (target === 'location') { syncLocationScreen(); }
   if (target === 'relaynotify') { void renderRelayNotify(); }
   if (target === 'confirm') { void renderCaptureList(); }
   if (target === 'tracking' && appState.currentScreen === 'confirm') {

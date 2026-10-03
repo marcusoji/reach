@@ -26,6 +26,9 @@ class MainActivity : Activity() {
         }
     }
     private val permissionRequestId = 9001
+    // A WebView geolocation prompt that arrived before the runtime location dialog was answered.
+    private var pendingGeoCallback: android.webkit.GeolocationPermissions.Callback? = null
+    private var pendingGeoOrigin: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,7 +39,7 @@ class MainActivity : Activity() {
         view.settings.allowContentAccess = false
         view.settings.allowFileAccessFromFileURLs = false
         view.settings.allowUniversalAccessFromFileURLs = false
-        view.settings.setGeolocationEnabled(false)
+        view.settings.setGeolocationEnabled(true)
         view.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
                 val host = request.url.host
@@ -49,6 +52,28 @@ class MainActivity : Activity() {
             }
         }
         view.addJavascriptInterface(Bridge(this, allowedHost), "REACH_NATIVE_RELAY")
+        // The citizen PWA reads GPS through the WebView. Without a WebChromeClient Android silently
+        // denies navigator.geolocation, so the page could never obtain a fix inside the app.
+        view.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: android.webkit.GeolocationPermissions.Callback?,
+            ) {
+                if (origin == null || callback == null) return
+                val host = android.net.Uri.parse(origin).host
+                val trusted = host != null && host == allowedHost
+                if (!trusted) { callback.invoke(origin, false, false); return }
+                if (locationPermissionGranted()) {
+                    callback.invoke(origin, true, false)
+                } else {
+                    // Hold the prompt and ask the OS; the callback is answered in
+                    // onRequestPermissionsResult once the citizen answers the location dialog.
+                    pendingGeoCallback = callback
+                    pendingGeoOrigin = origin
+                    requestPermissions(locationRequiredPermissions().toTypedArray(), permissionRequestId)
+                }
+            }
+        }
         val url = BuildConfig.REACH_CITIZEN_URL
         if (url.startsWith("https://") || url.startsWith("http://localhost") || url.startsWith("http://127.0.0.1")) {
             view.loadUrl(url)
@@ -66,6 +91,13 @@ class MainActivity : Activity() {
         if (requestCode == permissionRequestId) {
             startRelayServiceIfPermitted()
             enableRadios()
+            // The WebView may have asked for location while the dialog was up; answer it now.
+            pendingGeoCallback?.let { cb ->
+                val origin = pendingGeoOrigin
+                if (origin != null) cb.invoke(origin, locationPermissionGranted(), false)
+            }
+            pendingGeoCallback = null
+            pendingGeoOrigin = null
         }
     }
 
@@ -78,6 +110,11 @@ class MainActivity : Activity() {
     /** True only when every runtime permission the radio transports need is granted. */
     internal fun relayPermissionsGranted(): Boolean =
         relayRequiredPermissions().all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+
+    /** True when the app may read location on the PWA's behalf. */
+    internal fun locationPermissionGranted(): Boolean =
+        ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     /**
      * The runtime permissions the relay transports need, by OS level:
@@ -102,6 +139,17 @@ class MainActivity : Activity() {
         else -> listOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
+    /**
+     * Location permissions, requested separately from the relay set so that denying GPS does not
+     * disable the relay. On API 33+ the split Bluetooth permissions no longer imply location, and the
+     * WebView hands the PWA's GPS read to the app — without this the citizen's location is silently
+     * unavailable inside the app.
+     */
+    private fun locationRequiredPermissions(): List<String> = listOf(
+        android.Manifest.permission.ACCESS_FINE_LOCATION,
+        android.Manifest.permission.ACCESS_COARSE_LOCATION,
+    )
+
     private fun startRelayServiceIfPermitted() {
         if (relayPermissionsGranted()) {
             startForegroundService(Intent(this, RelayService::class.java))
@@ -110,8 +158,9 @@ class MainActivity : Activity() {
 
     internal fun requestRuntimePermissions() {
         val required = relayRequiredPermissions().toMutableList()
+        required += locationRequiredPermissions()
         if (android.os.Build.VERSION.SDK_INT >= 33) required += android.Manifest.permission.POST_NOTIFICATIONS
-        val missing = required.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        val missing = required.distinct().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), permissionRequestId)
     }
 

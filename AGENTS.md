@@ -461,4 +461,21 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   queued or stuck instead of a scripted "relaying" claim. The incident-history screen lists only
   the signed-in citizen's own reports, falls back to a local cache offline, and never fabricates
   rows.
+- **GPS inside the Android app was dead: the WebView denied it.** `MainActivity` set
+  `setGeolocationEnabled(false)` and had no `WebChromeClient`, so `navigator.geolocation` in the PWA
+  was silently refused; and on API 33+ the split Bluetooth permissions no longer imply location, so
+  fine location was never requested. The WebView now enables geolocation, answers
+  `onGeolocationPermissionsShowPrompt` only for the configured REACH origin and only when the app
+  holds the permission (holding the prompt while the runtime dialog is answered), and the app
+  requests location separately from the relay set so denying GPS cannot disable the relay.
+- **Coordinates belong to a GPS fix and nothing else.** `setSelectedLocation` left `latitude`/
+  `longitude` in state when the citizen switched from GPS back to a registered zone, so the report
+  shipped a "Zone B" label alongside the abandoned GPS point — a responder would be sent to the
+  wrong place. Leaving GPS now clears the coordinates, and a non-GPS report carries none.
+- **A GPS read must not hang or overwrite a good choice.** `requestGpsLocation` used a bare
+  `getCurrentPosition` with `alert()` on failure. On iOS Safari a denied grant can leave the call
+  unresolved, so it now wraps each attempt in a watchdog and falls back from a high-accuracy fix to
+  a coarse one. A *failed* read drops back to the registered zone rather than leaving "GPS" selected
+  with no coordinates. The row's status text is updated in place, and the static default no longer
+  claims "Unavailable — no signal" before anything was attempted.
 

@@ -110,6 +110,13 @@ export function setSelectedLocation(locationType, label) {
   if (label) {
     appState.emergency.locationLabel = label;
   }
+  // Coordinates belong to the GPS fix only. Leaving it for a zone must drop the stale fix, or the
+  // report would ship a "Zone B" label alongside the last GPS point.
+  if (locationType !== 'gps') {
+    appState.emergency.latitude = null;
+    appState.emergency.longitude = null;
+    appState.emergency.locationAccuracyM = null;
+  }
   notifySubscribers();
 }
 
