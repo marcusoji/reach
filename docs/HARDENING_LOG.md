@@ -276,3 +276,28 @@ because it is destructive.
 full migration set (bootstrap + 0001–0021): every one of the 30 public tables reports
 at least one row, the second run reproduces the same counts, and RLS read checks pass
 for an institution admin and a super-admin.
+
+## 0025 Full-system audit (read/write routes, schema, isolation)
+
+**Context.** Before clearing and re-seeding the hosted database for the pitch, the
+system was exercised end to end to catch schema, logic and runtime faults.
+
+**Checks.** All 21 migrations apply transactionally (31 tables) on a throwaway
+Postgres+PostGIS 16 database; RLS is enabled on every public table (the five policy-less
+tables are deliberately service-role-only); every `SECURITY DEFINER` function pins
+`search_path`; the full local suite passes (migration/hardening/security, RPC contract
+19/19, AI, relay, PWA, BMONI, tenant-isolation and RPC-shadowing SQL fixtures). Against
+the hosted project, every GET route was called as each of the six roles and no route
+returned 5xx; the write paths were exercised live (contact CRUD, incident create →
+AI assess → evidence → status walk `reported→received→verifying→verified→assigned→
+responding→on_scene→resolved→closed`, staff invite create + redeem, responder add +
+self status, assignment accept, device register, operator invitation, notification
+delivery, and a fresh signup → self-service institution creation, which previously
+500'd). Cross-tenant reads are denied and incident creation auto-queues the reporter's
+emergency-contact notification and the institution security-desk notification.
+
+**Fix.** `GET /incidents/{id}` used `.single()`, so a missing — or RLS-hidden,
+cross-tenant — incident surfaced PostgREST's raw `PGRST116` text ("Cannot coerce the
+result to a single JSON object"). It now uses `.maybeSingle()` and returns a clean
+`404 { error: 'Incident not found' }`; the global handler also stops echoing the
+`PGRST116` message (status was already correct).

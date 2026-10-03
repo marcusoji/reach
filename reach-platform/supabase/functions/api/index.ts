@@ -434,8 +434,11 @@ Deno.serve(async (req) => {
     const incidentGetMatch = path.match(/^\/incidents\/([^/]+)$/);
     if (incidentGetMatch && req.method === 'GET') {
       const id = requireUuid(incidentGetMatch[1]);
-      const { data, error } = await supabase.from('incidents').select('id,code,institution_id,reporter_id,category,status,priority,title,description,source_channel,delivery_method,location_label,location_source,location_accuracy_m,location_context,ai_confidence,ai_fp_code,auto_pushed,via_relay,reported_at,acknowledged_at,resolved_at,closed_at,created_at,updated_at').eq('id', id).single();
+      const { data, error } = await supabase.from('incidents').select('id,code,institution_id,reporter_id,category,status,priority,title,description,source_channel,delivery_method,location_label,location_source,location_accuracy_m,location_context,ai_confidence,ai_fp_code,auto_pushed,via_relay,reported_at,acknowledged_at,resolved_at,closed_at,created_at,updated_at').eq('id', id).maybeSingle();
       if (error) throw error;
+      // RLS hides another institution's incident, so a missing row is the tenant-isolation
+      // signal too -- return the same 404 rather than leaking PostgREST's `.single()` error.
+      if (!data) return json({ error: 'Incident not found' }, 404);
       return json({ data });
     }
 
@@ -1135,7 +1138,7 @@ if (path === '/notifications' && req.method === 'GET') {
 
     // Deliberate guard messages (P0001) and every 4xx are caller-facing; only unexpected 5xx
     // failures are hidden behind a generic message so internals never leak.
-    const surface = code === 'P0001' || status < 500;
+    const surface = (code === 'P0001' || status < 500) && code !== 'PGRST116';
     return json({ error: surface ? message : 'Request could not be completed', correlation_id: correlationId }, status);
   }
 });
