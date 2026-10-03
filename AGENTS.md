@@ -437,4 +437,28 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `POST /devices/register`, then uploading a signed packet to `POST /relay/packets`, creates a
   provisional incident (`source_channel=relay`, `via_relay=true`) readable by the reporter; the
   direct `POST /incidents` path also returns 201. Both reach REACH.
+- **The Wi-Fi Direct relay path was silently disabled on API 31–32.** `Permissions.wifiDirect`
+  required `NEARBY_WIFI_DEVICES`, which does not exist before API 33, so on 31–32 the gate always
+  read denied and the Wi-Fi transport never ran — Bluetooth alone carried the relay. The gate now
+  uses `ACCESS_FINE_LOCATION` below 33. `WifiDirectRelay.startAckServer` also binds the group-owner
+  listener only when the permission is actually held, instead of advertising a path that can never
+  complete.
+- **The relay node reports the real radio state, not an optimistic one.** `MainActivity.Bridge`
+  `getPermissionStatus`/`requestPermissions` previously echoed the permission grant back as
+  `bluetooth: true, wifi: true` even when the radios were off, and the foreground notification
+  always claimed "listening". They now read `bluetoothEnabled()` / `wifiEnabled()` /
+  `RelayGatewayUploader.hotspotActive()` and word the status honestly (Bluetooth on → turn Wi-Fi or
+  hotspot on → ready). A hotspot is a local-only link and is not treated as a gateway path.
+- **A relayed packet keeps the envelope of the node that forwarded it.** `RelayGatewayUploader
+  .buildBody` re-signed a packet with a non-zero hop count using *this* device's key, stamping the
+  wrong node as the relay of a hop it did not make. It now uploads an existing relay envelope
+  verbatim and only builds one for a hop this node actually performed.
+- **The PWA requests the relay radios on open (native only) and shows real relay status.**
+  `requestRadiosOnOpen()` asks the native node for Bluetooth-then-Wi-Fi permission at launch; a
+  plain browser is skipped because Web Bluetooth only opens its chooser from a real user gesture.
+  `js/relay/status.js` reads the live relay queue (exposed as `window.REACH_RELAY_QUEUE` to avoid a
+  backend import cycle) and the home chip / relay-notification text report what is actually
+  queued or stuck instead of a scripted "relaying" claim. The incident-history screen lists only
+  the signed-in citizen's own reports, falls back to a local cache offline, and never fabricates
+  rows.
 

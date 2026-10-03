@@ -26,6 +26,8 @@ jobs:
       - run: npm run test:relay
       - run: npm run test:pwa-relay
       - run: npm run test:pwa-relay-permissions
+      - run: npm run test:pwa-relay-status
+      - run: npm run test:pwa-history
       - run: npm run test:pwa-api-resilience
       - run: npm run test:rpc-contract
       - uses: denoland/setup-deno@v2

@@ -13,7 +13,7 @@ import {
   setNetworkAvailable,
   subscribeState
 } from './state.js';
-import { navigateTo, SCREEN_CONFIG } from './navigation.js';
+import { navigateTo, SCREEN_CONFIG, registerScreenRenderers } from './navigation.js';
 import { $, $$, setText, evidenceKindForMime } from './utils.js';
 
 /**
@@ -166,8 +166,9 @@ if (document.readyState === 'loading') {
 }
 
 // Backend + offline-first enhancements
-import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getContacts, addContact, deleteContact, backendConfigured, hasSession } from './backend.js';
+import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession } from './backend.js';
 import { relayPermissionStatus, requestRelayPermissions } from './relay/permissions.js';
+import { relayStatus, relaySummary } from './relay/status.js';
 
 /** Show what relay capability this device actually has, without claiming a radio is on. */
 async function refreshRelayPermissionUi() {
@@ -292,6 +293,92 @@ async function renderContacts() {
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c])); }
 
+const HISTORY_STATUS_LABEL = {
+  reported: 'Reported', received: 'Received by REACH', verifying: 'Verifying', verified: 'Verified',
+  assigned: 'Responder assigned', responding: 'Responders on the way', on_scene: 'On scene',
+  resolved: 'Resolved', closed: 'Closed', cancelled: 'Cancelled',
+};
+
+function historyStatusLabel(status) { return HISTORY_STATUS_LABEL[status] || String(status || 'Reported').replace(/_/g, ' '); }
+
+function formatHistoryDate(value) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/** Render the citizen's own incident history. Never fabricates rows: with no session and no
+ * cached history it says so, and it shows the last known list when offline. */
+async function renderIncidentHistory() {
+  const list = $('#historyList');
+  const status = $('#historyStatus');
+  if (!list) return;
+  list.innerHTML = '<div class="contact-row"><div><div class="contact-name">Loading your history…</div></div></div>';
+  if (!backendConfigured || !hasSession()) {
+    if (status) status.textContent = 'Sign in to see your incident history.';
+    list.innerHTML = '<div class="contact-row"><div class="contact-avatar">—</div><div><div class="contact-name">Sign in required</div><div class="contact-rel">Your past reports are tied to your REACH account.</div></div></div>';
+    return;
+  }
+  let rows = [];
+  let offline = false;
+  try { rows = await getIncidentHistory(); } catch { rows = await getIncidentHistory({ refresh: false }); offline = true; }
+  if (!navigator.onLine) offline = true;
+  if (status) status.textContent = offline
+    ? 'Showing your last known history — reconnect to refresh.'
+    : 'Your past emergency reports and their outcomes.';
+  if (!rows.length) {
+    list.innerHTML = '<div class="contact-row"><div class="contact-avatar">+</div><div><div class="contact-name">No incidents yet</div><div class="contact-rel">Emergencies you report will appear here.</div></div></div>';
+    return;
+  }
+  list.replaceChildren();
+  for (const incident of rows) {
+    const row = document.createElement('div');
+    row.className = 'contact-row';
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.dataset.historyId = incident.id;
+    const avatar = document.createElement('div');
+    avatar.className = 'contact-avatar';
+    avatar.textContent = String(incident.category || '?').slice(0, 1).toUpperCase();
+    const body = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'contact-name';
+    name.textContent = `${incident.code || 'Incident'} · ${historyStatusLabel(incident.status)}`;
+    const detail = document.createElement('div');
+    detail.className = 'contact-rel';
+    detail.textContent = `${formatHistoryDate(incident.reported_at || incident.created_at)} · ${incident.location_label || 'Location pending'}${incident.via_relay ? ' · via relay' : ''}`;
+    body.append(name, detail);
+    row.append(avatar, body);
+    list.appendChild(row);
+  }
+}
+
+/** Show one incident from the local history cache. */
+function openHistoryDetail(id) {
+  const cached = (() => { try { return JSON.parse(localStorage.getItem('reach_incident_history') || '[]'); } catch { return []; } })();
+  const incident = cached.find((r) => r.id === id);
+  const title = $('#historyDetailTitle');
+  const box = $('#historyDetailBox');
+  if (!incident || !box) return;
+  if (title) title.textContent = incident.code || 'Incident';
+  const row = (label, value) => {
+    const div = document.createElement('div');
+    div.className = 'summary-row';
+    const l = document.createElement('span'); l.textContent = label;
+    const v = document.createElement('span'); v.textContent = value;
+    div.append(l, v);
+    return div;
+  };
+  box.replaceChildren(
+    row('Type', String(incident.category || 'unknown')),
+    row('Status', historyStatusLabel(incident.status)),
+    row('Priority', String(incident.priority || 'high')),
+    row('Reported', formatHistoryDate(incident.reported_at || incident.created_at)),
+    row('Location', incident.location_label || 'Location pending'),
+    row('Delivery', incident.delivery_method || (incident.via_relay ? 'Relay path' : 'Connected gateway')),
+  );
+}
+
 async function trackActiveIncident() {
   const stored = (()=>{try{return JSON.parse(localStorage.getItem('reach_last_incident')||'null')}catch{return null}})();
   const id = appState.emergency.incidentId || stored?.id; if (!id || !backendConfigured || !hasSession()) return;
@@ -400,11 +487,54 @@ document.addEventListener('click', event => {
   }
   const removeButton = event.target.closest('[data-contact-delete]');
   if (removeButton) { const id=removeButton.getAttribute('data-contact-delete'); if(id) void deleteContact(id).then(renderContacts).catch(error=>alert(error.message || 'Unable to remove contact')); }
+  const historyRow = event.target.closest('[data-history-id]');
+  if (historyRow) { openHistoryDetail(historyRow.getAttribute('data-history-id')); navigateTo('historydetail'); }
 });
 window.addEventListener('online', () => { setNetworkAvailable(true); });
 window.addEventListener('offline', () => { setNetworkAvailable(false); });
 
 const originalSetup = setupEventDelegation;
+
+/** The relay notification screen reflects the real queue, not a scripted "relaying" claim. */
+async function renderRelayNotify() {
+  const text = $('#relayNotifyText');
+  if (!text) return;
+  try {
+    const status = await relayStatus();
+    text.textContent = relaySummary(status);
+  } catch {
+    text.textContent = 'Relaying an emergency alert nearby. Tap to see what is being sent.';
+  }
+}
+
+/** Keep the home relay chip honest: show what the node is actually doing right now. */
+async function refreshRelayProgress() {
+  const progress = $('#homeRelayProgress');
+  if (!progress) return;
+  if (!appState.relayEnabled) { progress.textContent = ''; return; }
+  try {
+    const status = await relayStatus();
+    progress.textContent = relaySummary(status);
+  } catch { progress.textContent = ''; }
+}
+
+/**
+ * On app open, ask the node to switch its radios on: Bluetooth first, then Wi-Fi.
+ *
+ * Only the native relay node can do this on launch — it owns the runtime permission dialog and the
+ * radio prompts. A plain browser cannot turn either radio on programmatically, and Web Bluetooth
+ * only opens its chooser from a real user gesture, so there we leave the request to the relay
+ * screen rather than firing an ungestured chooser on open. Nothing here claims a radio is on when
+ * the platform refused.
+ */
+async function requestRadiosOnOpen() {
+  try {
+    const status = await relayPermissionStatus();
+    if (status.nativeRelay) await requestRelayPermissions();
+  } catch { /* best effort; the relay screen re-requests with explicit feedback */ }
+  void refreshRelayProgress();
+}
+
 // Extend the existing delegated interactions without changing the visual structure.
 const originalInit = init;
 
@@ -424,6 +554,7 @@ async function enhancedNavHandler(event) {
     setTimeout(() => { void enterRelayPermissionScreen(); }, 0);
   }
   if (target === 'contacts') { void renderContacts(); }
+  if (target === 'relaynotify') { void renderRelayNotify(); }
   if (target === 'confirm') { void renderCaptureList(); }
   if (target === 'tracking' && appState.currentScreen === 'confirm') {
     event.preventDefault();
@@ -452,9 +583,12 @@ document.addEventListener('click', (event) => { void enhancedNavHandler(event); 
 
 const savedProfile = (() => { try { return JSON.parse(localStorage.getItem('reach_pwa_profile') || 'null'); } catch { return null; } })();
 if (savedProfile) Object.assign(appState.user, savedProfile);
+registerScreenRenderers({ history: renderIncidentHistory, relayProgress: refreshRelayProgress });
 initBackendSync();
 syncProfileIntoHome();
 syncNetworkUi();
+void requestRadiosOnOpen();
+window.setInterval(() => { if (appState.currentScreen === 'home') void refreshRelayProgress(); }, 15000);
 const demoResolve = $('#demoResolveButton');
 const demoRelay = $('#demoRelayButton');
 if (backendConfigured) { if (demoResolve) demoResolve.style.display = 'none'; if (demoRelay) demoRelay.style.display = 'none'; }

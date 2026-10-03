@@ -114,6 +114,24 @@ class RelayGatewayUploaderTest {
     }
 
     @Test
+    fun `buildBody preserves a relay envelope already on the packet`() {
+        // A packet that arrived over the radio carries the forwarding node's envelope. This node is
+        // only uploading it, so the envelope must survive verbatim rather than be re-signed here.
+        val relayed = directPacket()
+            .put("h", 2)
+            .put("relay_device_id", "node-7")
+            .put("relay_public_key", "relay-spki")
+            .put("relay_signature", "relay-sig")
+            .put("relay_signed_payload", "v=2&k=pkt-abcdef01&h=2")
+        val body = RelayGatewayUploader.buildBody(relayed)
+        assertEquals(2, body.optInt("hop_count"))
+        assertEquals("node-7", body.optString("relay_device_id"))
+        assertEquals("relay-spki", body.optString("relay_public_key"))
+        assertEquals("relay-sig", body.optString("relay_signature"))
+        assertEquals("v=2&k=pkt-abcdef01&h=2", body.optString("relay_signed_payload"))
+    }
+
+    @Test
     fun `upload posts the body and returns true on 200`() {
         RelayGatewayUploader.connectivityProbe = { true }
         var auth = ""

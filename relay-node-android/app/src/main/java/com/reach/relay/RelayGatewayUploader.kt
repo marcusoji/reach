@@ -13,9 +13,9 @@ import java.time.Instant
  * Uploads a validated relay packet to the REACH gateway (Edge Function /relay/packets).
  *
  * A node that has connectivity drains its queue through here; a node without connectivity
- * leaves the packet for a radio hop. A packet that already travelled a hop is wrapped in this
- * device's relay envelope, because the gateway refuses a non-zero hop count that no relay
- * envelope vouches for.
+ * leaves the packet for a radio hop. A packet that arrived over the radio already carries the
+ * forwarding node's relay envelope, and the gateway refuses a non-zero hop count that no relay
+ * envelope vouches for — so the envelope is uploaded as-is rather than re-signed here.
  */
 object RelayGatewayUploader {
     private const val TAG = "ReachRelay"
@@ -55,6 +55,20 @@ object RelayGatewayUploader {
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
+    /**
+     * Whether a hotspot (or any local-only link) is up. This is a transport hint for the UI, not a
+     * gateway path: an emergency packet is only delivered when a real internet-capable network
+     * reaches the gateway.
+     */
+    fun hotspotActive(context: Context): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        return cm.allNetworks.any { net ->
+            val caps = cm.getNetworkCapabilities(net) ?: return@any false
+            !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+        }
+    }
+
     /** Overridable so tests can drive the upload path without a real network. */
     internal var connectivityProbe: (Context) -> Boolean = { hasNetwork(it) }
 
@@ -89,10 +103,16 @@ object RelayGatewayUploader {
         }
     }
 
-    /** Map the stored radio packet to the /relay/packets request body. */
+    /** Map the stored radio packet to the /relay/packets request body.
+     *
+     * A packet that arrived over the radio already carries a relay envelope from the node that
+     * forwarded it. This node is only uploading it, so the envelope is preserved verbatim: signing
+     * a new envelope here would stamp this device as the relay of a hop it did not make, and the
+     * server's relay-institution attribution would point at the wrong node.
+     */
     internal fun buildBody(packet: JSONObject): JSONObject {
         val hops = packet.optInt("h", 0)
-        val signed = if (hops > 0) RelayProtocol.gatewayRelayEnvelope(packet) else packet
+        val signed = if (hops > 0 && packet.optString("relay_device_id").isBlank()) RelayProtocol.gatewayRelayEnvelope(packet) else packet
         return JSONObject()
             .put("v", signed.optInt("v", RelayProtocol.PROTOCOL_VERSION))
             .put("packet_key", signed.optString("k"))

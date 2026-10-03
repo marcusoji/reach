@@ -32,6 +32,9 @@ internal object Permissions {
         else true
 
     fun wifiDirect(context: Context): Boolean =
+        // Wi-Fi Direct rides on NEARBY_WIFI_DEVICES from API 33, but the platform also accepts
+        // fine location on 31-32. Requiring NEARBY_WIFI_DEVICES there would always read denied
+        // (the permission does not exist before 33) and silently disable the Wi-Fi transport.
         if (Build.VERSION.SDK_INT >= 33) granted(context, Manifest.permission.NEARBY_WIFI_DEVICES)
         else granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
 }

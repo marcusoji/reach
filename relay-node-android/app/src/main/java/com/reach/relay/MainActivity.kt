@@ -175,10 +175,14 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun getPermissionStatus(): String {
             val main = activity as? MainActivity
+            val wifi = main?.wifiEnabled() == true
+            val hotspot = RelayGatewayUploader.hotspotActive(activity)
             return JSONObject()
                 .put("permissions", main?.relayPermissionsGranted() == true)
                 .put("bluetooth", main?.bluetoothEnabled() == true)
-                .put("wifi", main?.wifiEnabled() == true)
+                .put("wifi", wifi)
+                .put("hotspot", hotspot)
+                .put("detail", permissionDetail(main?.relayPermissionsGranted() == true, main?.bluetoothEnabled() == true, wifi || hotspot))
                 .toString()
         }
 
@@ -192,12 +196,27 @@ class MainActivity : Activity() {
                 main.enableRadios()
             }
             val granted = main?.relayPermissionsGranted() == true
+            val bluetooth = main?.bluetoothEnabled() == true
+            val wifi = main?.wifiEnabled() == true || RelayGatewayUploader.hotspotActive(activity)
             return JSONObject()
                 .put("accepted", granted)
-                .put("bluetooth", granted)
-                .put("wifi", granted)
-                .put("detail", if (granted) "Relay node ready" else "Waiting for Bluetooth/Wi-Fi permission")
+                .put("bluetooth", bluetooth)
+                .put("wifi", wifi)
+                .put("hotspot", RelayGatewayUploader.hotspotActive(activity))
+                .put("detail", permissionDetail(granted, bluetooth, wifi))
                 .toString()
+        }
+
+        /**
+         * Bluetooth is switched on first (the platform shows a dialog), then Wi-Fi. Android does
+         * not let an app flip Wi-Fi on, so the most we can do is open the connectivity panel when
+         * Wi-Fi is off; the wording reflects that instead of claiming both radios are on.
+         */
+        private fun permissionDetail(granted: Boolean, bluetooth: Boolean, wifi: Boolean): String = when {
+            !granted -> "Waiting for Bluetooth/Wi-Fi permission"
+            !bluetooth -> "Permission granted — switch Bluetooth on to relay"
+            !wifi -> "Bluetooth on — turn Wi-Fi or hotspot on for the second relay path"
+            else -> "Relay node ready — Bluetooth and Wi-Fi on"
         }
     }
 }

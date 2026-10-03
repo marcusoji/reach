@@ -70,10 +70,15 @@ class RelayService : Service() {
                 NotificationChannel(channelId, "REACH Relay", NotificationManager.IMPORTANCE_LOW)
             )
         }
+        val transport = when {
+            RelayGatewayUploader.isConfigured(this) -> "Uplink + nearby relay"
+            Permissions.wifiDirect(this) -> "Bluetooth + Wi-Fi relay"
+            else -> "Bluetooth relay"
+        }
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle("REACH relay active")
-            .setContentText("Listening for nearby emergency packets")
+            .setContentText("$transport · listening for nearby emergency packets")
             .setOngoing(true)
             .build()
     }

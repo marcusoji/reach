@@ -143,7 +143,43 @@ export async function listRelayDeadLetter(){
   const rows=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}).catch(()=>[]);
   return rows.filter(i=>i.state==='dead_letter');
 }
+/** Live relay-queue rows (pending + dead) so the UI can show what is actually waiting to move. */
+export async function listRelayQueue(){
+  const db=await openDb().catch(()=>null); if(!db) return [];
+  return new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}).catch(()=>[]);
+}
 export async function getIncident(id){return (await api(`/incidents/${encodeURIComponent(id)}`)).data;}
+
+const HISTORY_CACHE_KEY='reach_incident_history';
+
+/** The signed-in citizen's own incident history, newest first.
+ *
+ * `/incidents` is RLS-scoped to rows this user can see (their own reports, their institution's, or
+ * everything for an operator/super-admin), so the list is filtered to rows this user reported.
+ * The result is cached so the history screen still has something to show with no connection.
+ */
+export async function getIncidentHistory({refresh=true}={}){
+  const cached=readHistoryCache();
+  if(!refresh) return cached;
+  if(!backendConfigured || !hasSession()) return cached;
+  try{
+    const rows=(await api('/incidents?limit=50')).data||[];
+    const mine=filterOwnIncidents(rows);
+    writeHistoryCache(mine);
+    return mine;
+  }catch{ return cached; }
+}
+
+/** Keep only incidents this user reported. A row without a reporter_id (older shape) is kept. */
+export function filterOwnIncidents(rows){
+  const userId=getSession()?.user?.id;
+  if(!userId) return rows||[];
+  return (rows||[]).filter(r=>!r.reporter_id || r.reporter_id===userId);
+}
+
+function readHistoryCache(){ try{ const raw=JSON.parse(localStorage.getItem(HISTORY_CACHE_KEY)||'[]'); return Array.isArray(raw)?raw:[]; }catch{ return []; } }
+function writeHistoryCache(rows){ try{ localStorage.setItem(HISTORY_CACHE_KEY,JSON.stringify(rows.slice(0,50))); }catch{ /* storage full or unavailable */ } }
+
 export async function updateProfile(patch){return (await api('/me',{method:'PATCH',body:JSON.stringify(patch)})).data;}
 export async function queueIncident(payload,idempotencyKey){const db=await openDb();const now=Date.now();await purgeExpired(db,now);const items=await allQueuedFromDb(db);if(items.length>=QUEUE_MAX_ITEMS){throw new Error('Offline emergency queue is full; reconnect to send pending emergencies before creating another queued report.');}await put(db,{id:idempotencyKey,payload,idempotencyKey,createdAt:now,attempts:0,nextAttemptAt:now});}
 export async function flushQueue(){
@@ -324,3 +360,7 @@ export function resumeOfflineQueue(){
   // Deferred resume after sign-in
   setTimeout(run, 1500);
 }
+
+// Expose the relay-queue reader for the relay status UI. Importing backend.js from
+// relay/status.js would be a cycle (backend -> protocol -> ... ), so status.js reads this handle.
+if(typeof window!=='undefined') window.REACH_RELAY_QUEUE={listRelayQueue,listRelayDeadLetter};

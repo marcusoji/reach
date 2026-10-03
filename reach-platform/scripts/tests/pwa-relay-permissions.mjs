@@ -72,10 +72,11 @@ console.log('\n=== PWA relay permissions ===');
 {
   // 6. relayPermissionStatus surfaces the native bridge and capability detail without prompting.
   reset();
-  globalThis.window.REACH_NATIVE_RELAY = { getPermissionStatus: () => JSON.stringify({ permissions: true, bluetooth: true, wifi: true }) };
+  globalThis.window.REACH_NATIVE_RELAY = { getPermissionStatus: () => JSON.stringify({ permissions: true, bluetooth: true, wifi: true, hotspot: false }) };
   const status = await relayPermissionStatus();
   ck('status reports native relay', status.nativeRelay === true && status.native?.permissions === true);
   ck('status recommends the native path', status.recommendedPath === 'native-relay-node');
+  ck('status carries the hotspot flag', status.native?.hotspot === false);
 }
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);

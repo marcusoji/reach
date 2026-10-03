@@ -83,7 +83,13 @@ export const SCREEN_CONFIG = {
   },
   resolved: {
     index: 12,
-    title: 'Resolved',
+    title: 'Incident history',
+    signal: 'yes',
+    showStatusBar: true
+  },
+  historydetail: {
+    index: 12,
+    title: 'Incident detail',
     signal: 'yes',
     showStatusBar: true
   },
@@ -266,5 +272,21 @@ export function navigateTo(screenKey) {
     }, 2000);
   } else if (screenKey === 'aidetect') {
     runAiDetectionSequence();
+  } else if (screenKey === 'resolved') {
+    renderHistoryScreen();
+  } else if (screenKey === 'home') {
+    refreshRelayProgress();
   }
+}
+
+// Assigned by app.js after import. navigation.js is imported before app.js's module body runs, so a
+// direct import would be a cycle; the hooks are optional and guarded. The history detail renderer is
+// driven by the row click (which knows the id), not by navigation.
+let renderHistoryScreen = () => {};
+let refreshRelayProgress = () => {};
+
+/** app.js registers the history/relay renderers here to avoid an import cycle. */
+export function registerScreenRenderers({ history, relayProgress } = {}) {
+  if (history) renderHistoryScreen = history;
+  if (relayProgress) refreshRelayProgress = relayProgress;
 }

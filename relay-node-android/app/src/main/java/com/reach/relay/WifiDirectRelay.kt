@@ -121,6 +121,9 @@ class WifiDirectRelay(private val context: Context) {
 
     /** Start group-owner style listener that validates, enqueues, returns ACK. */
     fun startAckServer(context: Context, onPacket: (org.json.JSONObject) -> Unit) {
+        // Fail closed: without the Wi-Fi Direct permission the radio is unusable, and binding the
+        // listener anyway would advertise a relay path that can never complete a transfer.
+        if (manager == null || channel == null || !Permissions.wifiDirect(context)) return
         thread(isDaemon = true, name = "reach-wifi-ack") {
             try {
                 server = ServerSocket(8988).also { it.soTimeout = 0 }
