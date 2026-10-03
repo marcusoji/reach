@@ -331,3 +331,41 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `withBmoniUserId` heals already-broken rows on first use. `scripts/tests/bmoni-user-id.mjs` pins this
   (wired into `validate:all`).
 
+- **Demo seed is two institutions × two of every stakeholder.** `scripts/seed-demo-data.sql` inserts
+  Greenfield Estate (`1111…`, active subscription) and Northgate University (`2222…`, trial, no BMONI
+  account) with two accounts per role (institution, staff, security-desk, citizen; platform operator
+  and super-admin), ten incidents spread across the status lifecycle plus matching events,
+  assignments, evidence, AI rows, relay packets and notifications. Every sign-in uses
+  `ReachDemo!2026`. Re-seeding is idempotent. `scripts/clear-demo-data.sql` empties every data table
+  while keeping schema, RLS and the two canonical `ai_model_registry` rows; both run hosted through
+  the `seed-demo-data` / `clear-demo-data` `workflow_dispatch` workflows (Supabase Management API).
+  `scripts/tests/supabase-bootstrap.sql` mirrors the real `auth.users` columns so both scripts can be
+  exercised locally against the full migration set.
+
+- **Registration paths, by role.** A citizen self-signs-up at `POST /auth/v1/signup` (the GoTrue
+  trigger creates a `citizen` profile) and can immediately file incidents and add contacts. An
+  unassigned citizen becomes an institution via `POST /institutions`
+  (`create_institution_for_current_user`). Staff and security-desk join only through an
+  institution-issued invite: admin `POST /invites` → new signup → `POST /invites/redeem` (single-use
+  code). Operators join through a single-use `POST /operator/invitations` (super-admin only) → signup
+  → `POST /operator/invitations/accept` (email-bound). The bootstrap `POST /operator/provision` key is
+  disabled the moment any operator/super-admin exists, by design.
+
+- **Relay (Bluetooth/Wi-Fi) needs a registered device public key.** A `/relay/packets` source must be
+  an `active` `device_registrations` row whose `public_key` matches the packet's `source_public_key`
+  (`ingest_relay_packet_service`); the PWA registers it on sign-in (`register_my_relay_device`,
+  ECDSA-P256). The signed payload is compact JSON with **no** spaces (`JSON.stringify` style) and
+  `null` for absent values; the expiry must land on a whole second because `ttl_expires_at` is
+  re-serialised through `Date.parse` server-side. `sendOrQueueEmergency` queues a signed packet when
+  offline with no native bridge and uploads it on reconnect, so relay works without the native Android
+  relay node. On a relayed incident the `delivery_method` is `relay` and `via_relay` is true.
+
+- **BMONI Pay is gated on two server env values.** `BMONI_BASE_URL` + `BMONI_API_KEY` alone let
+  user/wallet/KYC/nigeria run (all reach the sandbox), but
+  `POST /institution/billing/bmoni/payment/proposal` needs `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN`
+  (decimal CNGN, e.g. `14500`; missing → `422`) and `REACH_BMONI_TREASURY_ADDRESS` (0x destination;
+  missing → `503`). Set both as Edge Function secrets and redeploy before demoing Pay. The subscription
+  only flips to `active` on the BMONI settlement webhook, never on a browser success screen. Use the
+  Northgate trial tenant for the live walkthrough — Greenfield is already configured. `GET /audit` is
+  operator/super-admin only; `/audit-logs` is not a route.
+
