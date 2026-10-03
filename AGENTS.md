@@ -311,3 +311,14 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   validation failure lists the offending properties there. `scripts/tests/bmoni-phone-normalize.mjs`
   pins both behaviours (wired into `validate:all`).
 
+
+- **`POST /v1/users` returns two ids; only `bmoniUserId` works in user-scoped paths.** The response is
+  `{ user: { id, bmoniUserId, ... } }`. `user.id` is an internal row id and `user.bmoniUserId` is the
+  value every `/v1/users/{id}/...` route accepts — they differ. Extracting `result.user.id` (the old
+  `result.bmoniUserId || result.id || result.user.id || ...` chain did) stores an id that 404s
+  ("User not found") on status, kyc, deposit-account, start-nigeria and the payment paths. Read the id
+  only through `bmoniUserIdFrom` (`supabase/functions/api/bmoni.ts`), which never falls back to the
+  internal id; `findBmoniUserIdByEmail` recovers it (paged `GET /v1/users`, no email filter exists) and
+  `withBmoniUserId` heals already-broken rows on first use. `scripts/tests/bmoni-user-id.mjs` pins this
+  (wired into `validate:all`).
+

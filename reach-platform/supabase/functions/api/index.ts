@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0';
 import { assessEvidence } from './ai_engine.ts';
 import { modelAssist, aiLastFailure, aiLastFailureKind, aiCircuitSnapshot } from './ai_provider.ts';
-import { bmoni, bmoniConfigured, normalizePhone } from './bmoni.ts';
+import { bmoni, bmoniConfigured, normalizePhone, bmoniUserIdFrom, findBmoniUserIdByEmail } from './bmoni.ts';
 import { verifyRelayBody } from './relay_verify.ts';
 
 const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
@@ -76,6 +76,30 @@ function numberValue(value: unknown, min: number, max: number): number | null {
 function requireUuid(value: string | null): string {
   if (!value || !/^[0-9a-f-]{36}$/i.test(value)) throw new Error('Invalid resource id');
   return value;
+}
+
+/** Resolve the BMONI `bmoniUserId` for an institution, healing a row that stored the
+ *  wrapper's internal `id` (which every user-scoped endpoint rejects with 404 "User not
+ *  found"). When a call against the stored id 404s and the row still has the payer email,
+ *  look the user up by email and persist the corrected id; otherwise rethrow.
+ *
+ *  `run` must not mutate anything before its first BMONI call, so a retry is safe. */
+async function withBmoniUserId(
+  account: { bmoni_user_id: string | null; metadata?: any },
+  run: (bmoniUserId: string) => Promise<any>,
+  persist: (healed: string, storedId: string) => Promise<void>,
+): Promise<any> {
+  try {
+    return await run(String(account.bmoni_user_id));
+  } catch (error: any) {
+    const storedId = String(account.bmoni_user_id);
+    const payerEmail = account?.metadata?.payer_email;
+    if (error?.status !== 404 || !payerEmail) throw error;
+    const healed = await findBmoniUserIdByEmail(payerEmail);
+    if (!healed || healed === storedId) throw error;
+    await persist(healed, storedId);
+    return await run(healed);
+  }
 }
 
 /** Derive the deterministic engine's evidence set from an incident that already exists.
@@ -598,7 +622,11 @@ Deno.serve(async (req) => {
         if (error?.status === 409 && error?.body) result = error.body;
         else throw error;
       }
-      const bmoniUserId = result?.bmoniUserId || result?.id || result?.user?.id || result?.data?.bmoniUserId || result?.data?.id;
+      // BMONI returns `{ user: { id, bmoniUserId } }`; only `bmoniUserId` is accepted by
+      // user-scoped paths (the wrapper's `id` 404s). A 409 carries no record, and an
+      // account with no stored id has nothing to read back, so recover by email lookup.
+      let bmoniUserId = bmoniUserIdFrom(result);
+      if (!bmoniUserId && email) bmoniUserId = await findBmoniUserIdByEmail(email);
       if (!bmoniUserId) return json({ error: 'BMONI user already exists, but the existing user id was not returned. Resolve the account through BMONI support/admin tooling.' }, 409);
       const { data, error } = await requireService().from('bmoni_institution_accounts').upsert({
         institution_id: profile.institution_id,
@@ -615,9 +643,12 @@ Deno.serve(async (req) => {
       const body = await readJsonLimited(req);
       const walletAddress = textValue(body.wallet_address, 120);
       if (!walletAddress) return json({ error: 'Wallet address is required' }, 422);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id) return json({ error: 'Create the institution BMONI payer account first' }, 409);
-      const challenge = await bmoni.ownerProofChallenge(account.bmoni_user_id, { currency: 'CNGN', userOwnerAddress: walletAddress });
+      const service = requireService();
+      const challenge = await withBmoniUserId(account,
+        (id) => bmoni.ownerProofChallenge(id, { currency: 'CNGN', userOwnerAddress: walletAddress }),
+        (healed) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {}));
       return json({ data: challenge });
     }
 
@@ -628,13 +659,16 @@ Deno.serve(async (req) => {
       const challengeId = textValue(body.owner_proof_challenge_id, 200);
       const signature = textValue(body.owner_proof_signature, 300);
       if (!walletAddress || !challengeId || !signature) return json({ error: 'wallet_address, owner_proof_challenge_id and owner_proof_signature are required' }, 422);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id) return json({ error: 'Create the institution BMONI payer account first' }, 409);
-      const result = await bmoni.createManagedWallet(account.bmoni_user_id, { currency: 'CNGN', userOwnerAddress: walletAddress, ownerProofChallengeId: challengeId, ownerProofSignature: signature });
+      const service = requireService();
+      const result = await withBmoniUserId(account,
+        (id) => bmoni.createManagedWallet(id, { currency: 'CNGN', userOwnerAddress: walletAddress, ownerProofChallengeId: challengeId, ownerProofSignature: signature }),
+        (healed) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {}));
       const walletId = result?.smartWalletId || result?.id || result?.smartWallet?.id;
       const returnedAddress = result?.walletAddress || result?.address || result?.smartWallet?.address || walletAddress;
       if (!walletId) return json({ error: 'BMONI did not return a smart wallet id' }, 502);
-      const { data, error: updateError } = await requireService().from('bmoni_institution_accounts').update({ smart_wallet_id: String(walletId), wallet_address: returnedAddress, onboarding_status: 'wallet_created' }).eq('institution_id', profile.institution_id).select().single();
+      const { data, error: updateError } = await service.from('bmoni_institution_accounts').update({ smart_wallet_id: String(walletId), wallet_address: returnedAddress, onboarding_status: 'wallet_created' }).eq('institution_id', profile.institution_id).select().single();
       if (updateError) throw updateError;
       return json({ data: { smart_wallet_id: data.smart_wallet_id, wallet_address: data.wallet_address, onboarding_status: data.onboarding_status } }, 201);
     }
@@ -642,7 +676,7 @@ Deno.serve(async (req) => {
 
     if (path === '/institution/billing/bmoni/kyc' && req.method === 'PATCH') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id) return json({ error: 'Create the institution BMONI payer account first' }, 409);
       const body = await readJsonLimited(req);
       const personalInfo = body.personalInfo;
@@ -651,8 +685,11 @@ Deno.serve(async (req) => {
       // countryCode -- not street/city/countryCode. Accept either client name, send `address`.
       const address = body.address ?? body.addressDetails;
       if (!personalInfo || !address) return json({ error: 'personalInfo and address are required' }, 422);
-      const result = await bmoni.updateKyc(account.bmoni_user_id, { personalInfo, address, ...(body.occupationCode ? { occupationCode: body.occupationCode } : {}) });
-      return json({ data: result });
+      const service = requireService();
+      const kycResult = await withBmoniUserId(account,
+        (id) => bmoni.updateKyc(id, { personalInfo, address, ...(body.occupationCode ? { occupationCode: body.occupationCode } : {}) }),
+        (healed) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {}));
+      return json({ data: kycResult });
     }
 
     if (path === '/institution/billing/bmoni/start-nigeria' && req.method === 'POST') {
@@ -660,28 +697,35 @@ Deno.serve(async (req) => {
       const body = await readJsonLimited(req);
       const bvn = textValue(body.bvn, 20);
       if (!bvn || !/^\d{11}$/.test(bvn)) return json({ error: 'A valid 11-digit BVN is required' }, 422);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,wallet_address').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,metadata,wallet_address').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id || !account.wallet_address) return json({ error: 'Create the BMONI wallet before starting Nigeria onboarding' }, 409);
-      const result = await bmoni.startNigeria(account.bmoni_user_id, { bvn, ngnWalletAddress: account.wallet_address, ngnWalletIndex: Number(body.ngn_wallet_index ?? 0) });
-      const { error: updateError } = await requireService().from('bmoni_institution_accounts').update({ onboarding_status: 'ngn_started', bvn_verified: true }).eq('institution_id', profile.institution_id);
+      const service = requireService();
+      const result = await withBmoniUserId(account,
+        (id) => bmoni.startNigeria(id, { bvn, ngnWalletAddress: account.wallet_address, ngnWalletIndex: Number(body.ngn_wallet_index ?? 0) }),
+        (healed) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {}));
+      const { error: updateError } = await service.from('bmoni_institution_accounts').update({ onboarding_status: 'ngn_started', bvn_verified: true }).eq('institution_id', profile.institution_id);
       if (updateError) throw updateError;
       return json({ data: result });
     }
 
     if (path === '/institution/billing/bmoni/status' && req.method === 'GET') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id) return json({ error: 'BMONI payer account is not configured' }, 409);
-      const result = await bmoni.onboardingStatus(account.bmoni_user_id);
+      const service = requireService();
+      const result = await withBmoniUserId(account, (id) => bmoni.onboardingStatus(id), (healed) =>
+        service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {}));
       return json({ data: result });
     }
 
     if (path === '/institution/billing/bmoni/deposit-account' && req.method === 'GET') {
       if (profile.role !== 'institution' || !profile.institution_id) return json({ error: 'Institution administrator role required' }, 403);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id) return json({ error: 'BMONI payer account is not configured' }, 409);
-      const result = await bmoni.depositAccount(account.bmoni_user_id);
-      await requireService().from('bmoni_institution_accounts').update({ ngn_virtual_account_ready: true, onboarding_status: 'active' }).eq('institution_id', profile.institution_id);
+      const service = requireService();
+      const heal = (healed: string) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {});
+      const result = await withBmoniUserId(account, (id) => bmoni.depositAccount(id), heal);
+      await service.from('bmoni_institution_accounts').update({ ngn_virtual_account_ready: true, onboarding_status: 'active' }).eq('institution_id', profile.institution_id);
       return json({ data: result });
     }
 
@@ -694,16 +738,30 @@ Deno.serve(async (req) => {
       if (!idempotencyKey) return json({ error: 'x-idempotency-key is required for payment operations' }, 422);
       if (!amount || !/^\d+(\.\d{1,8})?$/.test(amount) || Number(amount) <= 0) return json({ error: 'A valid institutional subscription amount is required' }, 422);
       if (!treasuryAddress) return json({ error: 'REACH BMONI treasury wallet is not configured' }, 503);
-      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,smart_wallet_id').eq('institution_id', profile.institution_id).single();
+      const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,smart_wallet_id,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id || !account.smart_wallet_id) return json({ error: 'Complete BMONI user and CNGN wallet setup before paying' }, 409);
       const service = requireService();
+      // Resolve (and heal) the BMONI user id before writing any local rows, so the id recorded
+      // on bmoni_transactions — reused later by payment/sign — matches the provider calls here.
+      let bmoniUserId = String(account.bmoni_user_id);
+      try { await bmoni.onboardingStatus(bmoniUserId); }
+      catch (probeError: any) {
+        const payerEmail = account?.metadata?.payer_email;
+        if (probeError?.status === 404 && payerEmail) {
+          const healed = await findBmoniUserIdByEmail(payerEmail);
+          if (healed && healed !== bmoniUserId) {
+            await service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id);
+            bmoniUserId = healed;
+          }
+        }
+      }
       const { data: existing } = await service.from('bmoni_transactions').select('*').eq('institution_id', profile.institution_id).eq('idempotency_key', idempotencyKey).maybeSingle();
       if (existing) return json({ data: existing });
       const { data: subscription } = await supabase.from('subscriptions').select('id').eq('institution_id', profile.institution_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
 
       // Create the local financial intent BEFORE touching BMONI. The unique
       // (institution_id,idempotency_key) constraint is the concurrency guard.
-      const intentInsert = await service.from('bmoni_transactions').insert({ institution_id: profile.institution_id, subscription_id: subscription?.id ?? null, bmoni_user_id: account.bmoni_user_id, smart_wallet_id: account.smart_wallet_id, idempotency_key: idempotencyKey, amount: Number(amount), currency: 'CNGN', status: 'initiated', description: textValue(body.description, 240) || 'REACH institutional subscription' }).select().single();
+      const intentInsert = await service.from('bmoni_transactions').insert({ institution_id: profile.institution_id, subscription_id: subscription?.id ?? null, bmoni_user_id: bmoniUserId, smart_wallet_id: account.smart_wallet_id, idempotency_key: idempotencyKey, amount: Number(amount), currency: 'CNGN', status: 'initiated', description: textValue(body.description, 240) || 'REACH institutional subscription' }).select().single();
       if (intentInsert.error) {
         const { data: retryExisting } = await service.from('bmoni_transactions').select('*').eq('institution_id', profile.institution_id).eq('idempotency_key', idempotencyKey).maybeSingle();
         if (retryExisting) return json({ data: retryExisting });
@@ -718,11 +776,11 @@ Deno.serve(async (req) => {
       if (attachPayment.error) throw attachPayment.error;
 
       try {
-        const proposal = await bmoni.createProposal(account.bmoni_user_id, account.smart_wallet_id, { proposal: { type: 'TRANSFER', toAddress: treasuryAddress, amount, currency: 'CNGN', description: textValue(body.description, 240) || 'REACH institutional subscription' } });
+        const proposal = await bmoni.createProposal(bmoniUserId, account.smart_wallet_id, { proposal: { type: 'TRANSFER', toAddress: treasuryAddress, amount, currency: 'CNGN', description: textValue(body.description, 240) || 'REACH institutional subscription' } });
         const proposalId = proposal?.proposalId || proposal?.id || proposal?.proposal?.id;
         if (!proposalId) throw new Error('BMONI did not return a proposal id');
-        await bmoni.approveProposal(account.bmoni_user_id, String(proposalId));
-        const signPayload = await bmoni.proposalSignPayload(account.bmoni_user_id, String(proposalId));
+        await bmoni.approveProposal(bmoniUserId, String(proposalId));
+        const signPayload = await bmoni.proposalSignPayload(bmoniUserId, String(proposalId));
         // BMONI returns the digest as signingPayloadHash; hashToSign/payload are documented
         // names it does not emit. Missing all three silently stored sign_payload as null.
         const update = await service.from('bmoni_transactions').update({ proposal_id: String(proposalId), status: 'pending', sign_payload: signPayload?.signingPayloadHash || signPayload?.hashToSign || signPayload?.payload || null, raw_response: { proposal, signPayload } }).eq('id', intentInsert.data.id).select().single();

@@ -9,6 +9,36 @@ function requireConfigured() {
   if (!bmoniConfigured()) throw new Error('BMONI is not configured on the server');
 }
 
+/** Pull the stable provider id out of a `POST /v1/users` (or `GET /v1/users/{id}`) body.
+ *  BMONI wraps the record in a `user` object that carries **two** ids: the internal
+ *  row `id` and the `bmoniUserId` that every user-scoped path actually accepts. They
+ *  are different values, so an unwrap must read the nested `user.bmoniUserId` and must
+ *  never fall back to the internal row id — using it 404s ("User not found") on every
+ *  later call. Returns null when the shape is unrecognised so the caller can heal or
+ *  fail loudly instead of storing a broken id. */
+export function bmoniUserIdFrom(payload: any): string | null {
+  const user = payload?.user ?? payload?.data?.user ?? payload?.data ?? payload;
+  const id = user?.bmoniUserId ?? payload?.bmoniUserId;
+  return id ? String(id) : null;
+}
+
+/** Find an already-created user's `bmoniUserId` by email, for healing an account that
+ *  stored the wrong id. BMONI has no email filter, so this pages `GET /v1/users`
+ *  (the shared sandbox key sees the whole partner tenant). Bounded to 10 pages of 100
+ *  so a missing match fails fast rather than scanning the whole tenant. */
+export async function findBmoniUserIdByEmail(email: string): Promise<string | null> {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= 10; page++) {
+    const body = await request<any>(`/v1/users?page=${page}&limit=100`);
+    const users: any[] = body?.users ?? [];
+    if (!users.length) return null;
+    const match = users.find((u) => String(u?.email || '').toLowerCase() === target);
+    if (match) return bmoniUserIdFrom(match);
+    if (users.length < 100) return null;
+  }
+  return null;
+}
+
 /** Normalise a phone number to the E.164 shape BMONI requires.
  *  A bare local number is assumed Nigerian (+234) — the sandbox and the NGN rail are
  *  Nigeria-only and REACH's onboarding path is `start-nigeria` — rather than guessed.

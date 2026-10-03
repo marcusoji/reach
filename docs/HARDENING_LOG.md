@@ -195,3 +195,44 @@ patches. Local: `validate` PASS, hardening 10/10 PASS, production build PASS.
 
 Local verification is source + build only. Live RLS, real payments, multi-phone
 relay and load/pen tests remain external gates.
+
+## 0022 BMONI payer id: nested `user.bmoniUserId` (BUG-5)
+
+**Symptom.** Institution payer creation returns `201`, but every user-scoped BMONI
+call afterwards — `GET /institution/billing/bmoni/status`, `deposit-account`,
+`owner-proof-challenge`, `start-nigeria`, `kyc` — returns
+`404 {"error":"BMONI request failed (404): User not found"}`.
+
+**Root cause (reproduced against the sandbox).** `POST /v1/users` answers with the
+record wrapped in a `user` object that carries **two different ids**:
+
+```
+201 {"user": {"id": "<internal row id>", "bmoniUserId": "<the real user id>", ...}}
+```
+
+`bmoni_user_id` was extracted as `result.bmoniUserId || result.id || result.user.id
+|| ...` — for the real response every earlier key is absent, so the fallback chain
+landed on `result.user.id`, i.e. the **internal row id**. That id is accepted by no
+user-scoped path: `GET /v1/users/{internalId}/onboarding/status` returns `404`,
+while `GET /v1/users/{bmoniUserId}/onboarding/status` returns `200`. This is why the
+id used in the earlier successful lifecycle worked (it was the real `bmoniUserId`)
+and the payer-creation path did not.
+
+**Fix.**
+- `bmoniUserIdFrom(payload)` reads the nested `user.bmoniUserId` and **never** falls
+  back to the internal row `id`; it returns `null` on an unrecognised shape so the
+  caller fails loudly instead of storing a broken id.
+- Payer creation uses it. When the create is a `409` (user already exists, no record
+  returned) or an account row has no id, the id is recovered by
+  `findBmoniUserIdByEmail` (BMONI has no email filter, so `GET /v1/users` is paged,
+  bounded to 10x100).
+- `withBmoniUserId(account, run, persist)` wraps every user-scoped route: on a `404`
+  for the stored id it looks the payer up by email, persists the corrected id, and
+  retries once. Accounts already broken by the old extraction heal on first use.
+- The payment-proposal route resolves/heals the id *before* writing
+  `bmoni_transactions`, so the id reused later by `payment/sign` matches the provider.
+
+**Verification.** `bmoniUserIdFrom` 7/7 unit assertions pass (nested, flat, data-,
+409-body, and the regression guard that the internal id is never returned); raw
+sandbox reproduction confirmed `internal id -> 404` and `bmoniUserId -> 200` on the
+same user; esbuild bundles the Edge Function cleanly.
