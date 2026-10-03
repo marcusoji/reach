@@ -360,19 +360,27 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   offline with no native bridge and uploads it on reconnect, so relay works without the native Android
   relay node. On a relayed incident the `delivery_method` is `relay` and `via_relay` is true.
 
-- **BMONI Pay needs no separate treasury wallet.** `BMONI_BASE_URL` + `BMONI_API_KEY`
-  let user/wallet/KYC/nigeria run (all reach the sandbox). For
-  `POST /institution/billing/bmoni/payment/proposal` both the destination and the price are
-  server-controlled with working fallbacks: the destination is `REACH_BMONI_TREASURY_ADDRESS`
-  when set, otherwise the institution's own CNGN smart wallet
-  (`bmoni_institution_accounts.wallet_address`) — a self-transfer BMONI signs and settles the
-  same way; the amount is `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` (decimal CNGN, e.g.
-  `14500`) when set, otherwise the built-in `DEFAULT_SUBSCRIPTION_AMOUNT_CNGN`. Neither the
-  amount nor the destination can be client-supplied. The `503 treasury wallet is not
-  configured` / `422 valid amount` errors therefore only fire before wallet setup (no stored
-  wallet and no env) or if a bad amount is configured. Setting both secrets and redeploying
-  overrides the fallbacks — still the right move for production. The subscription only flips
-  to `active` on the BMONI settlement webhook, never on a browser success screen. Use the
-  Northgate trial tenant for the live walkthrough — Greenfield is already configured. `GET
-  /audit` is operator/super-admin only; `/audit-logs` is not a route.
+- **BMONI Pay: destination must differ from the payer wallet.** Verified live: BMONI rejects a
+  transfer whose recipient is the payer's own smart wallet (`400 Recipient wallet must be
+  different from the group wallet`), so a self-transfer is not a usable shortcut. The proposal
+  route uses `REACH_BMONI_TREASURY_ADDRESS` when set, otherwise the built-in
+  `DEFAULT_BMONI_TREASURY_ADDRESS` (REACH's receive-only demo treasury), and guards against a
+  destination equal to the institution wallet. The amount is
+  `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` (decimal CNGN, e.g. `14500`) when set, otherwise
+  `DEFAULT_SUBSCRIPTION_AMOUNT_CNGN`. Neither amount nor destination can be client-supplied.
+- **Sign-payload is prepared asynchronously.** After `approve`, `GET .../proposals/{id}/sign-payload`
+  can return `409 Signing payload is not ready yet` for a few seconds; the route persists the
+  proposal id first and retries on 409 (~24s). The sign step signs the **raw** `signingPayloadHash`
+  (`eth_account.unsafe_sign_hash`), not EIP-191.
+- **A signed proposal does not settle on an unfunded sandbox wallet.** The proposal reaches
+  `PENDING_SIGNATURES` and the local payment stays `pending`; the subscription only flips to
+  `active` on the BMONI settlement webhook (`process_bmoni_webhook_event`, statuses
+  successful/completed/failed/reversed). Nothing in the browser or a signed proposal activates it.
+- **Reusing one BVN across institutions works.** Verified: two payers sharing Bunch Dillon's BVN
+  `95888168924` both went `anchorStatus: active` and got their own NGN deposit account. What must
+  be **fresh per payer** is the phone number — the documented sandbox number is taken and a
+  duplicate returns `409`; `normalizePhone` + a unique `+2348…` works. The sandbox API key is
+  shared/not tenant-scoped.
+- Subscription walkthrough uses the Northgate trial tenant; Greenfield is already configured.
+  `GET /audit` is operator/super-admin only; `/audit-logs` is not a route.
 
