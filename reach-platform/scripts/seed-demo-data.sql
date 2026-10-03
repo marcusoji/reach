@@ -1,7 +1,7 @@
--- REACH — reset + demo seed (two institutions, two of every stakeholder)
+-- REACH — reset + demo seed (two institutions, one of every stakeholder)
 --
 -- Clears every REACH data record and inserts a coherent demo dataset: two institutions
--- and two accounts for every stakeholder role, plus representative rows in every other
+-- and one account for every stakeholder role, plus representative rows in every other
 -- table so each screen has something to show during the hackathon demo.
 --
 -- Run it in the Supabase SQL editor (Dashboard → SQL editor → paste → Run), or with psql
@@ -14,25 +14,15 @@
 --
 -- Demo sign-ins (all password ReachDemo!2026):
 --   admin@greenfield.reach.dev       institution   (Greenfield Estate — active subscription)
---   admin2@greenfield.reach.dev      institution
 --   staff@greenfield.reach.dev       staff
---   staff2@greenfield.reach.dev      staff
 --   desk@greenfield.reach.dev        security-desk
---   desk2@greenfield.reach.dev       security-desk
 --   citizen@greenfield.reach.dev     citizen
---   citizen2@greenfield.reach.dev    citizen
 --   ops@reach.dev                    operator
---   ops2@reach.dev                   operator
 --   superadmin@reach.dev             super-admin
---   superadmin2@reach.dev            super-admin
 --   admin@northgate.reach.dev        institution   (Northgate University — trial, not BMONI-configured)
---   admin2@northgate.reach.dev       institution
 --   staff@northgate.reach.dev        staff
---   staff2@northgate.reach.dev       staff
 --   desk@northgate.reach.dev         security-desk
---   desk2@northgate.reach.dev        security-desk
 --   citizen@northgate.reach.dev      citizen
---   citizen2@northgate.reach.dev     citizen
 --
 -- BMONI sandbox walkthrough: sign in as admin@northgate.reach.dev (trial, no account
 -- yet) and run Configure BMONI → Create payer → Create wallet → KYC → Start Nigeria →
@@ -119,27 +109,17 @@ create table public._seed_users(
 insert into _seed_users(id, email, full_name, phone, role, institution_id, zone_id) values
   -- Greenfield Estate (reference tenant, active subscription)
   ('aaaaaaaa-0000-0000-0000-000000000001', 'admin@greenfield.reach.dev',   'Greenfield Admin',   '+2348010000001', 'institution',   '11111111-1111-1111-1111-111111111111', null),
-  ('aaaaaaaa-0000-0000-0000-000000000011', 'admin2@greenfield.reach.dev',  'Greenfield Deputy',  '+2348010000011', 'institution',   '11111111-1111-1111-1111-111111111111', null),
   ('aaaaaaaa-0000-0000-0000-000000000002', 'staff@greenfield.reach.dev',   'Tunde Bello',        '+2348010000002', 'staff',         '11111111-1111-1111-1111-111111111111', null),
-  ('aaaaaaaa-0000-0000-0000-000000000012', 'staff2@greenfield.reach.dev',  'Rita Nwosu',         '+2348010000012', 'staff',         '11111111-1111-1111-1111-111111111111', null),
   ('aaaaaaaa-0000-0000-0000-000000000003', 'desk@greenfield.reach.dev',    'Amadi Okonkwo',      '+2348010000003', 'security-desk', '11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-0000000000a1'),
-  ('aaaaaaaa-0000-0000-0000-000000000013', 'desk2@greenfield.reach.dev',   'Halima Sani',        '+2348010000013', 'security-desk', '11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-0000000000a2'),
   ('aaaaaaaa-0000-0000-0000-000000000004', 'citizen@greenfield.reach.dev', 'Chioma Eze',         '+2348010000004', 'citizen',       '11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-0000000000a1'),
-  ('aaaaaaaa-0000-0000-0000-000000000014', 'citizen2@greenfield.reach.dev','Emeka Obi',          '+2348010000014', 'citizen',       '11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-0000000000a2'),
   -- Platform roles (no institution)
   ('aaaaaaaa-0000-0000-0000-000000000005', 'ops@reach.dev',                'Ops Ada',            '+2348010000005', 'operator',      null,                                   null),
-  ('aaaaaaaa-0000-0000-0000-000000000015', 'ops2@reach.dev',               'Ops Bode',           '+2348010000015', 'operator',      null,                                   null),
   ('aaaaaaaa-0000-0000-0000-000000000006', 'superadmin@reach.dev',         'REACH Super Admin',  '+2348010000006', 'super-admin',   null,                                   null),
-  ('aaaaaaaa-0000-0000-0000-000000000016', 'superadmin2@reach.dev',        'REACH Super Admin 2','+2348010000016', 'super-admin',   null,                                   null),
   -- Northgate University (trial, not BMONI-configured yet)
   ('aaaaaaaa-0000-0000-0000-000000000007', 'admin@northgate.reach.dev',    'Northgate Admin',    '+2348010000007', 'institution',   '22222222-2222-2222-2222-222222222222', null),
-  ('aaaaaaaa-0000-0000-0000-000000000017', 'admin2@northgate.reach.dev',   'Northgate Deputy',   '+2348010000017', 'institution',   '22222222-2222-2222-2222-222222222222', null),
-  ('aaaaaaaa-0000-0000-0000-000000000018', 'staff@northgate.reach.dev',    'Grace Umeh',         '+2348010000018', 'staff',         '22222222-2222-2222-2222-222222222222', null),
-  ('aaaaaaaa-0000-0000-0000-000000000019', 'staff2@northgate.reach.dev',   'Peter Akpan',        '+2348010000019', 'staff',         '22222222-2222-2222-2222-222222222222', null),
-  ('aaaaaaaa-0000-0000-0000-00000000001a', 'desk@northgate.reach.dev',     'Ngozi Ibe',          '+2348010000020', 'security-desk', '22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-0000000000b1'),
-  ('aaaaaaaa-0000-0000-0000-00000000001b', 'desk2@northgate.reach.dev',    'Sola Adeyemi',       '+2348010000021', 'security-desk', '22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-0000000000b2'),
   ('aaaaaaaa-0000-0000-0000-000000000008', 'citizen@northgate.reach.dev',  'Bola Ade',           '+2348010000008', 'citizen',       '22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-0000000000b1'),
-  ('aaaaaaaa-0000-0000-0000-00000000001c', 'citizen2@northgate.reach.dev', 'Kemi Balogun',       '+2348010000022', 'citizen',       '22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-0000000000b2');
+  ('aaaaaaaa-0000-0000-0000-000000000018', 'staff@northgate.reach.dev',    'Grace Umeh',         '+2348010000018', 'staff',         '22222222-2222-2222-2222-222222222222', null),
+  ('aaaaaaaa-0000-0000-0000-00000000001a', 'desk@northgate.reach.dev',     'Ngozi Ibe',          '+2348010000020', 'security-desk', '22222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-0000000000b1');
 
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -208,21 +188,13 @@ end $$;
 -- ---------------------------------------------------------------------------
 insert into public.institution_members(institution_id, user_id, membership_role, status) values
   ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001', 'institution',   'active'),
-  ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000011', 'institution',   'active'),
   ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000002', 'staff',         'active'),
-  ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000012', 'staff',         'active'),
   ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000003', 'security-desk', 'active'),
-  ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000013', 'security-desk', 'active'),
   ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000004', 'citizen',       'active'),
-  ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000014', 'citizen',       'active'),
   ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000007', 'institution',   'active'),
-  ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000017', 'institution',   'active'),
   ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000018', 'staff',         'active'),
-  ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000019', 'staff',         'active'),
   ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-00000000001a', 'security-desk', 'active'),
-  ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-00000000001b', 'security-desk', 'active'),
-  ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000008', 'citizen',       'active'),
-  ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-00000000001c', 'citizen',       'active');
+  ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000008', 'citizen',       'active');
 
 -- ---------------------------------------------------------------------------
 -- 5. RESPONDERS
@@ -230,8 +202,6 @@ insert into public.institution_members(institution_id, user_id, membership_role,
 insert into public.responders(id, user_id, institution_id, responder_type, duty_status, current_location, last_seen_at) values
   ('bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', 'staff',         'on_duty',  ST_SetSRID(ST_MakePoint(6.2040, 5.7895), 4326)::geography, now()),
   ('bbbbbbbb-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111', 'security-desk', 'off_duty', null, now()),
-  ('bbbbbbbb-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000012', '11111111-1111-1111-1111-111111111111', 'staff',         'on_task',  ST_SetSRID(ST_MakePoint(6.2037, 5.7893), 4326)::geography, now()),
-  ('bbbbbbbb-0000-0000-0000-000000000004', 'aaaaaaaa-0000-0000-0000-000000000013', '11111111-1111-1111-1111-111111111111', 'security-desk', 'on_duty',  ST_SetSRID(ST_MakePoint(6.2043, 5.7900), 4326)::geography, now()),
   ('bbbbbbbb-0000-0000-0000-000000000005', 'aaaaaaaa-0000-0000-0000-000000000018', '22222222-2222-2222-2222-222222222222', 'staff',         'on_duty',  ST_SetSRID(ST_MakePoint(6.5246, 3.3795), 4326)::geography, now()),
   ('bbbbbbbb-0000-0000-0000-000000000006', 'aaaaaaaa-0000-0000-0000-00000000001a', '22222222-2222-2222-2222-222222222222', 'security-desk', 'off_duty', null, now());
 
@@ -240,15 +210,11 @@ insert into public.responders(id, user_id, institution_id, responder_type, duty_
 -- ---------------------------------------------------------------------------
 insert into public.emergency_contacts(id, user_id, name, phone, relationship, notify_on_incident) values
   ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000004', 'Ngozi Eze',   '+2348090000001', 'sister',   true),
-  ('cccccccc-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000014', 'Ada Obi',     '+2348090000002', 'spouse',   true),
-  ('cccccccc-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000008', 'Femi Ade',    '+2348090000003', 'brother',  true),
-  ('cccccccc-0000-0000-0000-000000000004', 'aaaaaaaa-0000-0000-0000-00000000001c', 'Tola Balogun','+2348090000004', 'mother',   false);
+  ('cccccccc-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000008', 'Femi Ade',    '+2348090000003', 'brother',  true);
 
 insert into public.device_registrations(id, user_id, device_id, platform, relay_enabled, public_key, status, last_seen_at, metadata) values
   ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000004', 'demo-device-0001', 'android', true, 'demo-public-key-00000000000000000000000000000000000000000000000000000001', 'active', now(), '{"demo": true, "transport": "web-bluetooth"}'::jsonb),
-  ('dddddddd-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000014', 'demo-device-0002', 'android', true, 'demo-public-key-00000000000000000000000000000000000000000000000000000002', 'active', now(), '{"demo": true, "transport": "web-bluetooth"}'::jsonb),
-  ('dddddddd-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000008', 'demo-device-0003', 'android', true, 'demo-public-key-00000000000000000000000000000000000000000000000000000003', 'active', now(), '{"demo": true, "transport": "web-bluetooth"}'::jsonb),
-  ('dddddddd-0000-0000-0000-000000000004', 'aaaaaaaa-0000-0000-0000-00000000001c', 'demo-device-0004', 'android', true, 'demo-public-key-00000000000000000000000000000000000000000000000000000004', 'active', now(), '{"demo": true, "transport": "web-bluetooth"}'::jsonb);
+  ('dddddddd-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000008', 'demo-device-0003', 'android', true, 'demo-public-key-00000000000000000000000000000000000000000000000000000003', 'active', now(), '{"demo": true, "transport": "web-bluetooth"}'::jsonb);
 
 -- ---------------------------------------------------------------------------
 -- 7. INCIDENTS (trigger records the creation event + queues notifications)
@@ -268,7 +234,7 @@ insert into public.incidents(
    'pwa', 'internet', 'Block A lawn', 'gps', 25, ST_SetSRID(ST_MakePoint(6.2036, 5.7892), 4326)::geography,
    '{"note":"demo"}'::jsonb, 78.50, 'FP-2041', 'verified', true, false,
    'demo-incident-a1', now() - interval '15 minutes', now() - interval '14 minutes', null, null),
-  ('eeeeeeee-0000-0000-0000-000000000002', 'REACH-GF0002', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000014',
+  ('eeeeeeee-0000-0000-0000-000000000002', 'REACH-GF0002', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000004',
    'security', 'resolved', 'medium', 'Suspicious movement near Block B', 'Unidentified person loitering by the parking bay.',
    'pwa', 'internet', 'Block B parking', 'gps', 40, ST_SetSRID(ST_MakePoint(6.2042, 5.7899), 4326)::geography,
    '{}'::jsonb, 61.20, 'FP-3077', 'verified', true, false,
@@ -278,7 +244,7 @@ insert into public.incidents(
    'relay', 'relay', 'Estate gate', 'gps', 30, ST_SetSRID(ST_MakePoint(6.2031, 5.7888), 4326)::geography,
    '{"transport":"relay","provisional":false}'::jsonb, 84.00, 'FP-1188', 'verified', true, true,
    'demo-incident-a3', now() - interval '35 minutes', now() - interval '33 minutes', null, null),
-  ('eeeeeeee-0000-0000-0000-000000000004', 'REACH-GF0004', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000014',
+  ('eeeeeeee-0000-0000-0000-000000000004', 'REACH-GF0004', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000004',
    'fire', 'closed', 'low', 'Fire extinguisher discharge', 'A resident discharged a fire extinguisher in the corridor as a prank.',
    'pwa', 'internet', 'Block A corridor', 'registered', 60, ST_SetSRID(ST_MakePoint(6.2035, 5.7891), 4326)::geography,
    '{}'::jsonb, 45.00, 'FP-9001', 'rejected', false, false,
@@ -294,7 +260,7 @@ insert into public.incidents(
    'pwa', 'internet', 'Hostel Block B', 'network', 120, ST_SetSRID(ST_MakePoint(3.3792, 6.5244), 4326)::geography,
    '{}'::jsonb, null, null, 'unverified', false, false,
    'demo-incident-b1', now() - interval '3 minutes', null, null, null),
-  ('eeeeeeee-0000-0000-0000-000000000007', 'REACH-NG0002', '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-00000000001c',
+  ('eeeeeeee-0000-0000-0000-000000000007', 'REACH-NG0002', '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000008',
    'security', 'assigned', 'high', 'Theft reported at the science lab', 'A laptop was taken from the faculty of science lab.',
    'pwa', 'internet', 'Faculty of Science', 'gps', 35, ST_SetSRID(ST_MakePoint(3.3805, 6.5251), 4326)::geography,
    '{}'::jsonb, 70.00, 'FP-2210', 'verified', true, false,
@@ -304,7 +270,7 @@ insert into public.incidents(
    'pwa', 'internet', 'Main library steps', 'manual', null, ST_SetSRID(ST_MakePoint(3.3798, 6.5247), 4326)::geography,
    '{}'::jsonb, 58.00, 'FP-4400', 'pending', false, false,
    'demo-incident-b3', now() - interval '22 minutes', now() - interval '20 minutes', null, null),
-  ('eeeeeeee-0000-0000-0000-000000000009', 'REACH-NG0004', '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-00000000001c',
+  ('eeeeeeee-0000-0000-0000-000000000009', 'REACH-NG0004', '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000008',
    'other', 'on_scene', 'low', 'Flooded walkway', 'Heavy rain flooded the walkway between hostels.',
    'pwa', 'internet', 'Hostel walkway', 'gps', 50, ST_SetSRID(ST_MakePoint(3.3793, 6.5245), 4326)::geography,
    '{}'::jsonb, 40.00, 'FP-5500', 'verified', true, false,
@@ -325,7 +291,6 @@ insert into public.incident_events(id, incident_id, actor_id, event_type, from_s
 
 insert into public.incident_assignments(id, incident_id, responder_id, assigned_by, status, assigned_at, accepted_at) values
   ('12121212-0000-0000-0000-000000000001', 'eeeeeeee-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000003', 'accepted', now() - interval '10 minutes', now() - interval '9 minutes'),
-  ('12121212-0000-0000-0000-000000000002', 'eeeeeeee-0000-0000-0000-000000000003', 'bbbbbbbb-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000003', 'responding', now() - interval '30 minutes', now() - interval '29 minutes'),
   ('12121212-0000-0000-0000-000000000003', 'eeeeeeee-0000-0000-0000-000000000007', 'bbbbbbbb-0000-0000-0000-000000000005', 'aaaaaaaa-0000-0000-0000-00000000001a', 'assigned', now() - interval '45 minutes', null),
   ('12121212-0000-0000-0000-000000000004', 'eeeeeeee-0000-0000-0000-000000000009', 'bbbbbbbb-0000-0000-0000-000000000005', 'aaaaaaaa-0000-0000-0000-00000000001a', 'on_scene', now() - interval '75 minutes', now() - interval '74 minutes');
 
@@ -358,7 +323,7 @@ insert into public.ai_provider_events(id, institution_id, incident_id, outcome, 
 -- ---------------------------------------------------------------------------
 insert into public.relay_packets(id, packet_key, incident_id, source_device_id, relay_device_id, gateway_id, hop_count, max_hops, status, packet_hash, minimal_payload, received_at) values
   ('18181818-0000-0000-0000-000000000001', 'demo-packet-key-0001', 'eeeeeeee-0000-0000-0000-000000000001', 'demo-device-0001', null, 'demo-gateway-01', 0, 6, 'delivered', 'demo-packet-hash-0000000000000001', '{"location_label":"Block A lawn","location_source":"gps","location_accuracy_m":25}'::jsonb, now() - interval '14 minutes'),
-  ('18181818-0000-0000-0000-000000000002', 'demo-packet-key-0002', 'eeeeeeee-0000-0000-0000-000000000003', 'demo-device-0001', 'demo-device-0002', 'demo-gateway-01', 1, 6, 'delivered', 'demo-packet-hash-0000000000000002', '{"location_label":"Estate gate","location_source":"gps","location_accuracy_m":30}'::jsonb, now() - interval '34 minutes');
+  ('18181818-0000-0000-0000-000000000002', 'demo-packet-key-0002', 'eeeeeeee-0000-0000-0000-000000000003', 'demo-device-0001', null, 'demo-gateway-01', 1, 6, 'delivered', 'demo-packet-hash-0000000000000002', '{"location_label":"Estate gate","location_source":"gps","location_accuracy_m":30}'::jsonb, now() - interval '34 minutes');
 
 insert into public.relay_ingest_dedup(packet_key, packet_hash, institution_id, receive_count) values
   ('demo-packet-key-0001', 'demo-packet-hash-0000000000000001', '11111111-1111-1111-1111-111111111111', 1),
@@ -415,12 +380,10 @@ insert into public.institution_invites(id, institution_id, email, role, code_has
   ('27272727-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222', 'newstaff@northgate.reach.dev', 'staff', encode(digest('REACH-DEMOINVITE-NG', 'sha256'), 'hex'), now() + interval '72 hours', 'aaaaaaaa-0000-0000-0000-000000000007');
 
 insert into public.operator_invitations(id, email, token_hash, invited_by, status, expires_at) values
-  ('28282828-0000-0000-0000-000000000001', 'newops@reach.dev', encode(digest('demo-operator-invitation-token', 'sha256'), 'hex'), 'aaaaaaaa-0000-0000-0000-000000000006', 'pending', now() + interval '24 hours'),
-  ('28282828-0000-0000-0000-000000000002', 'newops2@reach.dev', encode(digest('demo-operator-invitation-token-2', 'sha256'), 'hex'), 'aaaaaaaa-0000-0000-0000-000000000016', 'pending', now() + interval '24 hours');
+  ('28282828-0000-0000-0000-000000000001', 'newops@reach.dev', encode(digest('demo-operator-invitation-token', 'sha256'), 'hex'), 'aaaaaaaa-0000-0000-0000-000000000006', 'pending', now() + interval '24 hours');
 
 insert into public.onboarding_sessions(id, user_id, email, onboarding_type, institution_id, intended_role, payload, status, expires_at) values
-  ('29292929-0000-0000-0000-000000000001', null, 'pending.institution@example.dev', 'institution', '11111111-1111-1111-1111-111111111111', 'institution', '{"demo": true}'::jsonb, 'pending', now() + interval '48 hours'),
-  ('29292929-0000-0000-0000-000000000002', null, 'pending.staff@example.dev', 'staff', '22222222-2222-2222-2222-222222222222', 'staff', '{"demo": true}'::jsonb, 'pending', now() + interval '48 hours');
+  ('29292929-0000-0000-0000-000000000001', null, 'pending.institution@example.dev', 'institution', '11111111-1111-1111-1111-111111111111', 'institution', '{"demo": true}'::jsonb, 'pending', now() + interval '48 hours');
 
 -- ---------------------------------------------------------------------------
 -- 14. AUDIT + RATE LIMIT

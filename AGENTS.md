@@ -331,9 +331,9 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `withBmoniUserId` heals already-broken rows on first use. `scripts/tests/bmoni-user-id.mjs` pins this
   (wired into `validate:all`).
 
-- **Demo seed is two institutions × two of every stakeholder.** `scripts/seed-demo-data.sql` inserts
+- **Demo seed is two institutions × one of every stakeholder.** `scripts/seed-demo-data.sql` inserts
   Greenfield Estate (`1111…`, active subscription) and Northgate University (`2222…`, trial, no BMONI
-  account) with two accounts per role (institution, staff, security-desk, citizen; platform operator
+  account) with one account per role (institution, staff, security-desk, citizen; platform operator
   and super-admin), ten incidents spread across the status lifecycle plus matching events,
   assignments, evidence, AI rows, relay packets and notifications. Every sign-in uses
   `ReachDemo!2026`. Re-seeding is idempotent. `scripts/clear-demo-data.sql` empties every data table
