@@ -376,6 +376,21 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `PENDING_SIGNATURES` and the local payment stays `pending`; the subscription only flips to
   `active` on the BMONI settlement webhook (`process_bmoni_webhook_event`, statuses
   successful/completed/failed/reversed). Nothing in the browser or a signed proposal activates it.
+- **Sandbox funding is not self-service, and it cannot cover the default price.** Verified against
+  BMONI's docs and the live sandbox: there is no faucet/mint endpoint. Sandbox balances start at
+  `0` (`GET .../smart-wallets/{id}/balance`) and BMONI credits them **manually** on request —
+  email `developers@bkey.me` the payer's signup phone, and they credit NGN 1,000 / USD 10
+  (embedded-docs.bmoni.com/request-test-tokens). The built-in subscription amount is
+  `DEFAULT_SUBSCRIPTION_AMOUNT_CNGN` = 14500 CNGN, so the default Pay flow can never settle in
+  sandbox even after the credit. A demoable sandbox settlement needs
+  `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` set to ≤ 1000 (and a fresh deploy). The shared
+  sandbox key is published in BMONI's own docs, so the sandbox is directly inspectable.
+- **The shared sandbox webhook does not point at REACH.** `GET /v1/webhooks/config` returns
+  `callbackUrl: https://bmoni-hackathon-demo.workers.dev/webhooks/bmoni` with events
+  `employee.deposit.completed`, `employee.withdrawal.completed`, `onboarding.completed`,
+  `kyc.action_required`. Until that callback is re-registered to REACH's
+  `/functions/v1/api/webhooks/bmoni` (via `POST /v1/webhooks/config`), no settlement event reaches
+  REACH regardless of balance. That re-registration is partner-key work, not a client change.
 - **Reusing one BVN across institutions works.** Verified: two payers sharing Bunch Dillon's BVN
   `95888168924` both went `anchorStatus: active` and got their own NGN deposit account. What must
   be **fresh per payer** is the phone number — the documented sandbox number is taken and a

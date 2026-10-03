@@ -60,6 +60,20 @@ delivers the settlement webhook (`successful`/`completed`) to
 `/functions/v1/api/webhooks/bmoni`. A funded wallet (load the NGN deposit account)
 is what makes that happen.
 
+**Funding the sandbox is manual, and the default price exceeds it.** There is no
+faucet. Sandbox wallets start at `0` and BMONI credits them on request: email
+`developers@bkey.me` the payer's signup phone and they credit NGN 1,000 / USD 10
+(usually within a business day) — see
+`https://embedded-docs.bmoni.com/request-test-tokens`. Because the built-in
+`DEFAULT_SUBSCRIPTION_AMOUNT_CNGN` is `14500`, the default Pay flow can never
+settle on the sandbox credit; set `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` to
+`1000` (or less) and redeploy to demo a real settlement.
+
+**The shared sandbox webhook points elsewhere.** `GET /v1/webhooks/config` returns
+`callbackUrl: https://bmoni-hackathon-demo.workers.dev/webhooks/bmoni`. Re-register
+the callback to REACH's `/functions/v1/api/webhooks/bmoni` (with the payment
+completion events) before expecting any settlement to arrive.
+
 **Reusing one identity across institutions.** Each institution gets its own payer
 user, wallet and NGN deposit account, but the Bunch Dillon identity (BVN
 `95888168924`) can be reused. The phone number must be **unique per payer** — the
