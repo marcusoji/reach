@@ -28,6 +28,13 @@ const MAX_RELAY_PACKET = 64 * 1024;
 // Fallback institutional subscription price (decimal CNGN) used only when
 // REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN is not set on the server.
 const DEFAULT_SUBSCRIPTION_AMOUNT_CNGN = '14500';
+// REACH's CNGN subscription treasury (receive-only), used when
+// REACH_BMONI_TREASURY_ADDRESS is not set. The destination must be a distinct
+// address: BMONI rejects a transfer whose recipient equals the payer's own wallet
+// ("Recipient wallet must be different from the group wallet"), so the payer's own
+// address cannot be used as the destination. Production should override this with
+// the env var pointing at a properly managed REACH treasury.
+const DEFAULT_BMONI_TREASURY_ADDRESS = '0x74c0A719282A7c268fC72d85B196d2E6f2BE4248';
 
 function rateLimitFor(path: string, method: string): { limit: number; window: number } {
   if (path.startsWith('/webhooks/')) return { limit: 120, window: 60 };
@@ -605,7 +612,7 @@ Deno.serve(async (req) => {
           subscription: subscription?.[0] ?? null,
           payments: payments ?? [],
           configured_amount_cngn: Deno.env.get('REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN')?.trim() || DEFAULT_SUBSCRIPTION_AMOUNT_CNGN,
-          treasury_address_configured: Boolean(Deno.env.get('REACH_BMONI_TREASURY_ADDRESS')?.trim() || account?.wallet_address),
+          treasury_address_configured: Boolean(Deno.env.get('REACH_BMONI_TREASURY_ADDRESS')?.trim() || DEFAULT_BMONI_TREASURY_ADDRESS),
         },
       });
     }
@@ -742,18 +749,17 @@ Deno.serve(async (req) => {
       // it; the default keeps the sandbox/demo walkthrough working with no extra configuration.
       // A client can never supply either the amount or the destination.
       const amount = Deno.env.get('REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN')?.trim() || DEFAULT_SUBSCRIPTION_AMOUNT_CNGN;
-      const configuredTreasury = Deno.env.get('REACH_BMONI_TREASURY_ADDRESS')?.trim() || '';
+      // Destination of the subscription transfer. Must be distinct from the payer's own
+      // wallet (BMONI rejects a self-transfer), so it falls back to REACH's treasury
+      // address rather than the institution's own wallet. Server-derived either way --
+      // a client can never name the destination.
+      const treasuryAddress = Deno.env.get('REACH_BMONI_TREASURY_ADDRESS')?.trim() || DEFAULT_BMONI_TREASURY_ADDRESS;
       const idempotencyKey = textValue(req.headers.get('x-idempotency-key') || body.idempotency_key, 160);
       if (!idempotencyKey) return json({ error: 'x-idempotency-key is required for payment operations' }, 422);
       if (!amount || !/^\d+(\.\d{1,8})?$/.test(amount) || Number(amount) <= 0) return json({ error: 'A valid institutional subscription amount is required' }, 422);
       const { data: account, error } = await supabase.from('bmoni_institution_accounts').select('bmoni_user_id,smart_wallet_id,wallet_address,metadata').eq('institution_id', profile.institution_id).single();
       if (error || !account?.bmoni_user_id || !account.smart_wallet_id) return json({ error: 'Complete BMONI user and CNGN wallet setup before paying' }, 409);
-      // Destination of the subscription transfer. Prefer the configured REACH treasury wallet;
-      // when no separate treasury exists (demo/sandbox) fall back to the institution's own CNGN
-      // smart wallet, which makes the proposal a self-transfer BMONI still signs and settles.
-      // Either way the destination is server-derived -- a client can never name it, nor the amount.
-      const treasuryAddress = configuredTreasury || String(account.wallet_address ?? '').trim();
-      if (!treasuryAddress) return json({ error: 'REACH BMONI treasury wallet is not configured' }, 503);
+      if (account.wallet_address && String(account.wallet_address).toLowerCase() === treasuryAddress.toLowerCase()) return json({ error: 'Subscription treasury must differ from the institution wallet' }, 503);
       const service = requireService();
       // Resolve (and heal) the BMONI user id before writing any local rows, so the id recorded
       // on bmoni_transactions — reused later by payment/sign — matches the provider calls here.
