@@ -121,6 +121,35 @@ set full_name = u.full_name, phone = u.phone, role = u.role,
 from _seed_users u
 where p.id = u.id;
 
+-- GoTrue scans several auth.users text columns into plain strings, so they must be ''
+-- rather than NULL or every password login fails with "Database error querying schema".
+-- The columns vary by GoTrue version, so set whichever exist.
+do $$
+declare col text;
+begin
+  foreach col in array array[
+    'confirmation_token','recovery_token','email_change_token_new','email_change',
+    'email_change_token_current','phone_change','phone_change_token','reauthentication_token'
+  ] loop
+    if exists (select 1 from information_schema.columns
+               where table_schema='auth' and table_name='users' and column_name=col) then
+      execute format('update auth.users set %I = '''' where %I is null', col, col);
+    end if;
+  end loop;
+  if exists (select 1 from information_schema.columns
+             where table_schema='auth' and table_name='users' and column_name='is_sso_user') then
+    update auth.users set is_sso_user = false where is_sso_user is null;
+  end if;
+  if exists (select 1 from information_schema.columns
+             where table_schema='auth' and table_name='users' and column_name='is_anonymous') then
+    update auth.users set is_anonymous = false where is_anonymous is null;
+  end if;
+  if exists (select 1 from information_schema.columns
+             where table_schema='auth' and table_name='users' and column_name='email_change_confirm_status') then
+    update auth.users set email_change_confirm_status = 0 where email_change_confirm_status is null;
+  end if;
+end $$;
+
 -- Identity rows let the dashboard show the user; password login works without them, so
 -- this is best-effort and must not abort the seed on a schema variant.
 do $$
