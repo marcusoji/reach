@@ -264,3 +264,19 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   packet-key → incident endpoint) so the client can repoint the row; that is a server + client change
   and is deliberately left out of scope for the hackathon MVP. Until then, treat relay-path evidence
   as upload-only.
+
+- **Reserved SQL keywords are a silent variable-shadowing trap in PL/pgSQL.** Migrations 0002/0012
+  declared `current_role public.reach_role` inside `create_institution_for_current_user` and
+  `redeem_staff_invite`. `current_role` is a reserved SQL keyword, so PL/pgSQL never bound the
+  variable: `select role into current_role` left it NULL and `current_role <> 'citizen'` resolved to
+  the SQL keyword — the database role of the SECURITY DEFINER owner (`postgres` locally,
+  `authenticated`/`supabase_admin` on Supabase), never `'citizen'`. The guard therefore raised on
+  every call, so `POST /institutions` returned 500 for every institution signup and staff-invite
+  redemption always reported "Account is already assigned a role". Migration `0019` renames the
+  variable to `caller_role` and restores the NULL-safe `is distinct from` check. Reproduced on a fresh
+  Postgres+PostGIS database and against the deployed project; `tests/rpc_variable_shadowing.sql`
+  (wired into `validate:migrations`) fails with `ERROR: Institution account cannot be created from
+  this account` if the collision ever returns. When declaring a PL/pgSQL variable, avoid every
+  reserved keyword — notably `current_role`, `current_user`, `session_user`, `user`, `current_schema`,
+  `current_date`, `localtime` — or the variable will silently read the built-in value instead.
+

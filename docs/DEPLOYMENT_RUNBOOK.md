@@ -97,7 +97,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Migrations apply in filename order, `0001` → `0018`. **Never skip one.** If you
+Migrations apply in filename order, `0001` → `0019`. **Never skip one.** If you
 prefer, paste each file into the Supabase SQL editor in the same order.
 
 ### 3.3 Enable Realtime
@@ -125,7 +125,7 @@ done
 npm run validate:migrations
 ```
 
-Result should be: `10 migrations applied transactionally (30 tables)` and
+Result should be: `19 migrations applied transactionally (31 tables)` and
 `row level security enabled on every public table`.
 
 ---

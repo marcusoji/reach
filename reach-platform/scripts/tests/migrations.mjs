@@ -162,3 +162,18 @@ if (bmoni.status !== 0) {
 }
 const bmoniPassed = (bmoni.stdout.match(/^PASS \d+/gm) || []).length;
 console.log(`PASS - BMONI webhook flow: ${bmoniPassed} assertions held (success -> paid/active, duplicate ignored, reversal -> cancelled/past_due, unknown proposal rejected).`);
+
+// RPC variable-shadowing suite (tests/rpc_variable_shadowing.sql). A PL/pgSQL variable named
+// after a reserved keyword (current_role) silently never binds, so a guard like
+// `current_role <> 'citizen'` compares the database role instead and always fires. That bug
+// made institution signup 500 and broke staff-invite redemption. This exercises both RPCs.
+const shadowSuite = join(here, '..', '..', '..', 'tests', 'rpc_variable_shadowing.sql');
+const shadow = psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '-f', shadowSuite]);
+if (shadow.status !== 0) {
+  const err = (shadow.stderr || '').split('\n').find((l) => /ERROR/i.test(l)) || shadow.stderr.trim();
+  console.error('FAIL - RPC variable-shadowing suite failed.');
+  console.error(`  ${err.trim()}`);
+  process.exit(1);
+}
+const shadowPassed = (shadow.stdout.match(/^PASS \d+/gm) || []).length;
+console.log(`PASS - RPC variable-shadowing suite: ${shadowPassed} assertions held (citizen creates institution, invite redemption, single-use invites).`);
