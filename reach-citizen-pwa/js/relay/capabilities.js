@@ -20,18 +20,6 @@ export async function detectRelayCapabilities(){
   };
 }
 
-export async function connectBluetoothRelay({serviceUuid,writeCharacteristicUuid}){
-  if(!navigator.bluetooth?.requestDevice) throw new Error('Web Bluetooth is unavailable in this browser.');
-  const device=await navigator.bluetooth.requestDevice({filters:[{services:[serviceUuid]}]});
-  const server=await device.gatt?.connect();
-  const service=await server?.getPrimaryService(serviceUuid);
-  const characteristic=await service?.getCharacteristic(writeCharacteristicUuid);
-  if(!characteristic) throw new Error('Relay characteristic is unavailable.');
-  return {device,characteristic};
-}
-
-export async function sendBluetoothPacket(connection,packet){
-  const bytes=new TextEncoder().encode(JSON.stringify(packet));
-  if(bytes.byteLength>512) throw new Error('BLE packet is too large; use fragmentation in the native relay adapter.');
-  await connection.characteristic.writeValue(bytes);
-}
+// The Web Bluetooth connect/send helpers live in relay/protocol.js (the module that also
+// defines the packet format and framing). They were previously duplicated here, which let
+// the two copies drift; import from protocol.js instead.
