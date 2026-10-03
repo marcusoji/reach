@@ -360,12 +360,19 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   offline with no native bridge and uploads it on reconnect, so relay works without the native Android
   relay node. On a relayed incident the `delivery_method` is `relay` and `via_relay` is true.
 
-- **BMONI Pay is gated on two server env values.** `BMONI_BASE_URL` + `BMONI_API_KEY` alone let
-  user/wallet/KYC/nigeria run (all reach the sandbox), but
-  `POST /institution/billing/bmoni/payment/proposal` needs `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN`
-  (decimal CNGN, e.g. `14500`; missing → `422`) and `REACH_BMONI_TREASURY_ADDRESS` (0x destination;
-  missing → `503`). Set both as Edge Function secrets and redeploy before demoing Pay. The subscription
-  only flips to `active` on the BMONI settlement webhook, never on a browser success screen. Use the
-  Northgate trial tenant for the live walkthrough — Greenfield is already configured. `GET /audit` is
-  operator/super-admin only; `/audit-logs` is not a route.
+- **BMONI Pay needs no separate treasury wallet.** `BMONI_BASE_URL` + `BMONI_API_KEY`
+  let user/wallet/KYC/nigeria run (all reach the sandbox). For
+  `POST /institution/billing/bmoni/payment/proposal` both the destination and the price are
+  server-controlled with working fallbacks: the destination is `REACH_BMONI_TREASURY_ADDRESS`
+  when set, otherwise the institution's own CNGN smart wallet
+  (`bmoni_institution_accounts.wallet_address`) — a self-transfer BMONI signs and settles the
+  same way; the amount is `REACH_INSTITUTION_SUBSCRIPTION_AMOUNT_CNGN` (decimal CNGN, e.g.
+  `14500`) when set, otherwise the built-in `DEFAULT_SUBSCRIPTION_AMOUNT_CNGN`. Neither the
+  amount nor the destination can be client-supplied. The `503 treasury wallet is not
+  configured` / `422 valid amount` errors therefore only fire before wallet setup (no stored
+  wallet and no env) or if a bad amount is configured. Setting both secrets and redeploying
+  overrides the fallbacks — still the right move for production. The subscription only flips
+  to `active` on the BMONI settlement webhook, never on a browser success screen. Use the
+  Northgate trial tenant for the live walkthrough — Greenfield is already configured. `GET
+  /audit` is operator/super-admin only; `/audit-logs` is not a route.
 
