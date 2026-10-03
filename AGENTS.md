@@ -398,4 +398,36 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   shared/not tenant-scoped.
 - Subscription walkthrough uses the Northgate trial tenant; Greenfield is already configured.
   `GET /audit` is operator/super-admin only; `/audit-logs` is not a route.
+- **"Failed to fetch" on signup/login is a CORS symptom, not an auth failure.** Supabase GoTrue
+  (`/auth/v1/*`) reflects the request `Origin`, so signup/login usually succeed; the failure is the
+  follow-up call to the Edge API (`/functions/v1/api/*`). That API only emits
+  `Access-Control-Allow-Origin` when the request `Origin` matches `REACH_ALLOWED_ORIGINS`, and the
+  browser drops a header-less response as an opaque `TypeError: Failed to fetch`. The deployed
+  project had no matching origin, so every browser call to the API was blocked. `corsFor` now
+  matches exact origins **and** single-label wildcards (`https://*.prod-runtime.all-hands.dev`), and
+  the deploy workflow sets `REACH_ALLOWED_ORIGINS` from the repo secret or a dev/preview fallback so
+  a missing secret cannot leave the API refusing everything. Diagnose with:
+  `curl -s -D - -o /dev/null -H "Origin: <app-origin>" -H "apikey: $ANON" .../functions/v1/api/health | grep -i access-control-allow-origin`.
+- **A failed post-signup profile sync must not fail the registration.** `signup` creates the auth
+  user and session; the extra `PATCH /me` (name/phone/relay flag) is best-effort. The PWA used to
+  await it unguarded, so a CORS/network error on the patch surfaced as "account creation failed"
+  while the account already existed — the second attempt then said "user already exists". The
+  handler now swallows that sync failure (retried by `initBackendSync`) and guards against a
+  double-tap with an in-flight flag.
+- **Every PWA/platform request is bounded and its network error is translated.** Both
+  `reach-citizen-pwa/js/backend.js` and `reach-platform/src/lib/reachApi.ts` route through a
+  `fetchWithTimeout` helper so a hung socket or a CORS rejection reads as "Could not reach REACH"
+  or "REACH took too long" instead of a raw `Failed to fetch`.
+- **A page cannot switch Bluetooth/Wi-Fi on; the native node can only prompt.** The relay
+  permission screen previously did nothing. `js/relay/permissions.js` now asks the native node
+  (`window.REACH_NATIVE_RELAY.requestPermissions`) when present — which requests the runtime
+  permissions and fires `ACTION_REQUEST_ENABLE` / the Wi-Fi panel at launch — and otherwise opens
+  the Web Bluetooth chooser from the user gesture. Wi-Fi Direct has no browser API and modern
+  Android forbids programmatic Wi-Fi enable, so the code reports the real outcome and never claims
+  a radio is on. `NEARBY_WIFI_DEVICES` only exists from API 33; requesting it on 31–32 would always
+  read as denied.
+- **The relay ingest path is verified live end-to-end.** Registering a device via
+  `POST /devices/register`, then uploading a signed packet to `POST /relay/packets`, creates a
+  provisional incident (`source_channel=relay`, `via_relay=true`) readable by the reporter; the
+  direct `POST /incidents` path also returns 201. Both reach REACH.
 

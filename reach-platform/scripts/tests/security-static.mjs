@@ -25,6 +25,10 @@ function check(name, cond) {
 }
 
 check('No wildcard CORS by default', !/allowedOrigins\[0\] === '\*'/.test(api) || /REACH_ALLOW_STAR_CORS/.test(api));
+// The allow-list is matched through a single-label wildcard matcher, so a preview/tunnel host can
+// be allowed without reflecting an arbitrary origin; a regression to plain `includes` silently
+// breaks those origins (the browser then reports "Failed to fetch").
+check('CORS origin matcher supports exact + single-label wildcard', /function originMatches/.test(api) && /some\(entry => originMatches/.test(api));
 check('Operator invitations exist', api.includes('/operator/invitations'));
 check('Bootstrap key blocked after first operator', api.includes('zero operators') || api.includes('first operator'));
 check('Webhook official signature header', /x-webhook-signature/i.test(api));

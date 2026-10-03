@@ -5,11 +5,32 @@ import { bmoni, bmoniConfigured, normalizePhone, bmoniUserIdFrom, findBmoniUserI
 import { verifyRelayBody } from './relay_verify.ts';
 
 const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
+
+/** Match a request Origin against one allow-list entry.
+ *
+ * An entry may be an exact origin (`https://app.example.com`) or a single-label wildcard
+ * (`https://*.example.com`), which matches exactly one extra label — `https://a.example.com`
+ * but not `https://a.b.example.com` and not the bare `https://example.com`. The wildcard is
+ * deliberately narrow so preview/preview-tunnel hosts can be allow-listed without ever
+ * reflecting an arbitrary origin back with credentialed CORS headers.
+ */
+function originMatches(entry: string, origin: string): boolean {
+  if (!entry) return false;
+  if (entry === origin) return true;
+  if (!entry.includes('*')) return false;
+  const star = entry.indexOf('*');
+  const prefix = entry.slice(0, star);
+  const suffix = entry.slice(star + 1);
+  if (!origin.startsWith(prefix) || !origin.endsWith(suffix)) return false;
+  const middle = origin.slice(prefix.length, origin.length - suffix.length);
+  return middle.length > 0 && !middle.includes('.') && !middle.includes('/');
+}
+
 function corsFor(req: Request) {
   const origin = req.headers.get('Origin') || '';
   // Production: explicit allow-list only. Wildcard is rejected for credentialed API use.
   const allowStar = allowedOrigins.length === 1 && allowedOrigins[0] === '*' && (Deno.env.get('REACH_ALLOW_STAR_CORS') === 'true');
-  const allowed = allowedOrigins.includes(origin) ? origin : (allowStar ? '*' : '');
+  const allowed = allowedOrigins.some(entry => originMatches(entry, origin)) ? origin : (allowStar ? '*' : '');
   const headers: Record<string, string> = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-idempotency-key',
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',

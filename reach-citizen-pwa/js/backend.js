@@ -30,6 +30,24 @@ const RELAY_QUEUE_MAX_ITEMS = 50;
 const backendConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export { backendConfigured };
 
+// Bound every request. Without this a hung socket leaves the UI spinning forever, and a CORS
+// rejection (which the browser reports as an opaque TypeError) was surfaced as "Failed to
+// fetch" with no explanation — and the post-signup profile sync made it look like the whole
+// registration had failed even though the account already existed.
+const REQUEST_TIMEOUT_MS = Number((typeof window !== 'undefined' && window.REACH_REQUEST_TIMEOUT_MS) || 0) || 20000;
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      throw new Error('REACH took too long to respond. Check your connection and try again.');
+    }
+    throw new Error('Could not reach REACH. Check your connection and try again.');
+  } finally { clearTimeout(timer); }
+}
+
 function getSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } }
 function setSession(session) { if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session)); else localStorage.removeItem(SESSION_KEY); }
 function authHeaders(token) { return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token || SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' }; }
@@ -37,13 +55,13 @@ function sessionFromAuth(data) { return { access_token:data.access_token, refres
 
 export function hasSession() { return Boolean(getSession()?.access_token); }
 async function registerRelayDevice(session){
-  try{ if(!session?.access_token || !backendConfigured)return; const id=await getRelayIdentity(); await fetch(`${API_URL}/devices/register`,{method:'POST',headers:{...authHeaders(session.access_token)},body:JSON.stringify({device_id:id.deviceId,public_key:id.publicKeyB64,platform:'pwa',metadata:{transport:'web-bluetooth',protocol_version:2}})}); }catch{}
+  try{ if(!session?.access_token || !backendConfigured)return; const id=await getRelayIdentity(); await fetchWithTimeout(`${API_URL}/devices/register`,{method:'POST',headers:{...authHeaders(session.access_token)},body:JSON.stringify({device_id:id.deviceId,public_key:id.publicKeyB64,platform:'pwa',metadata:{transport:'web-bluetooth',protocol_version:2}})}); }catch{}
 }
 function syncNativeBridgeSession(session){ try { const bridge=window.REACH_NATIVE_RELAY; if(bridge?.configureSession && session?.access_token) bridge.configureSession(API_URL,session.access_token,SUPABASE_ANON_KEY); } catch {} void registerRelayDevice(session); }
 
 async function refreshSession() {
   const current = getSession(); if (!current?.refresh_token) return null;
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:'POST', headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'}, body:JSON.stringify({refresh_token:current.refresh_token}) });
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method:'POST', headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'}, body:JSON.stringify({refresh_token:current.refresh_token}) });
   const data = await res.json().catch(()=>({}));
   if (!res.ok || !data.access_token) { setSession(null); return null; }
   const next = sessionFromAuth(data); setSession(next); syncNativeBridgeSession(next); return next;
@@ -56,14 +74,14 @@ async function validSession() {
 
 export async function signup({ email, password, fullName, phone }) {
   if (!backendConfigured) return { local:true };
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, { method:'POST', headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'}, body:JSON.stringify({email,password,data:{full_name:fullName,phone}}) });
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/signup`, { method:'POST', headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'}, body:JSON.stringify({email,password,data:{full_name:fullName,phone}}) });
   const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.msg||data.error_description||'Unable to create account');
   if(data.access_token){const session=sessionFromAuth(data);setSession(session);syncNativeBridgeSession(session);} return data;
 }
 
 export async function login({ email, password }) {
   if (!backendConfigured) return { local:true };
-  const res=await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+  const res=await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});
   const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error_description||data.msg||'Unable to sign in');
   const session=sessionFromAuth(data); setSession(session); syncNativeBridgeSession(session); return data;
 }
@@ -71,7 +89,7 @@ export async function login({ email, password }) {
 async function api(path, options={}, retry=true) {
   const session=await validSession();
   if(!session) throw new Error('NO_BACKEND_SESSION');
-  const res=await fetch(`${API_URL}${path}`,{...options,headers:{...authHeaders(session.access_token),...(options.headers||{})}});
+  const res=await fetchWithTimeout(`${API_URL}${path}`,{...options,headers:{...authHeaders(session.access_token),...(options.headers||{})}});
   if(res.status===401 && retry && session.refresh_token){await refreshSession();return api(path,options,false);}
   const data=await res.json().catch(()=>({})); if(!res.ok){const error=new Error(data.error||`Request failed (${res.status})`); error.status=res.status; throw error;} return data;
 }

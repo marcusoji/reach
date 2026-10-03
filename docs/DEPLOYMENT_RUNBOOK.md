@@ -168,8 +168,29 @@ supabase secrets set REACH_AI_ENDPOINT= REACH_AI_API_KEY= REACH_AI_MODEL=
 ```
 
 `REACH_ALLOWED_ORIGINS` must exactly match your deployed frontend origins or CORS
-will reject them. Wildcard `*` is refused unless you explicitly set
-`REACH_ALLOW_STAR_CORS=true` — do not do that in production.
+will reject them. Each entry is an exact origin, or a single-label wildcard such as
+`https://*.prod-runtime.all-hands.dev` (matches `https://x.prod-runtime.all-hands.dev`,
+not the bare domain and not a two-label subdomain). Prefer exact origins in production;
+the wildcard is for preview/tunnel hosts you do not control one-by-one. Wildcard `*` is
+refused unless you explicitly set `REACH_ALLOW_STAR_CORS=true` — do not do that in
+production.
+
+A missing or wrong allow-list is the usual cause of the PWA reporting
+"Failed to fetch" / "Could not reach REACH" on signup, login, or emergency submission:
+the browser drops the response before the app can read it. If the client fails this way,
+check the API's `Access-Control-Allow-Origin` header first:
+
+```bash
+curl -s -D - -o /dev/null -H "apikey: $ANON" \
+  -H "Origin: https://your-pwa.vercel.app" \
+  "https://<project-ref>.supabase.co/functions/v1/api/health" | grep -i access-control-allow-origin
+```
+
+The deploy workflow sets `REACH_ALLOWED_ORIGINS` on every API deploy: from the repo
+secret `REACH_ALLOWED_ORIGINS` when it is configured, otherwise from a dev/preview
+fallback (`localhost` plus the `*.prod-runtime.all-hands.dev` tunnel pattern) so a
+missing secret cannot leave the API refusing every browser request. Set the secret to
+your exact production origins before shipping.
 
 ---
 

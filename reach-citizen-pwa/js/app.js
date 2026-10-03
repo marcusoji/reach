@@ -110,6 +110,12 @@ function setupEventDelegation() {
     relayRow.addEventListener('click', handleRelayToggle);
   }
 
+  // Relay permission request (Bluetooth/Wi-Fi) from a user gesture.
+  const relayEnableButton = $('#relayEnableButton');
+  if (relayEnableButton) {
+    relayEnableButton.addEventListener('click', () => { void handleRelayPermissionRequest(); });
+  }
+
   // Category selection rows
   const catList = $('#catList');
   if (catList) {
@@ -161,7 +167,72 @@ if (document.readyState === 'loading') {
 
 // Backend + offline-first enhancements
 import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getContacts, addContact, deleteContact, backendConfigured, hasSession } from './backend.js';
+import { relayPermissionStatus, requestRelayPermissions } from './relay/permissions.js';
 
+/** Show what relay capability this device actually has, without claiming a radio is on. */
+async function refreshRelayPermissionUi() {
+  const statusEl = $('#relayPermissionStatus');
+  const button = $('#relayEnableButton');
+  if (!statusEl && !button) return;
+  const status = await relayPermissionStatus();
+  if (statusEl) {
+    if (status.nativeRelay) {
+      statusEl.textContent = 'Relay node detected — Bluetooth and Wi-Fi can be switched on for you.';
+    } else if (status.bluetoothApi) {
+      statusEl.textContent = status.bluetoothAvailable === false
+        ? 'This device reports Bluetooth is switched off. Turn it on, then grant access.'
+        : 'Tap to grant Bluetooth access. Wi-Fi stays on for your normal connection.';
+    } else {
+      statusEl.textContent = 'This browser cannot switch the radios on. Your emergency still reaches REACH over the network or through the offline queue.';
+    }
+  }
+  if (button) {
+    button.textContent = status.nativeRelay ? 'Turn on Bluetooth & Wi-Fi' : 'Allow Bluetooth access';
+  }
+}
+
+/** Request the relay radios from a user gesture and report the honest outcome. */
+async function handleRelayPermissionRequest() {
+  const statusEl = $('#relayPermissionStatus');
+  const button = $('#relayEnableButton');
+  if (button) button.disabled = true;
+  if (statusEl) statusEl.textContent = 'Waiting for permission…';
+  try {
+    const result = await requestRelayPermissions();
+    if (statusEl) {
+      statusEl.textContent = result.granted
+        ? (result.detail || 'Relay radios are ready.')
+        : (result.detail || 'Relay permission was not granted. Your alert still reaches REACH.');
+    }
+    if (result.granted) {
+      setRelayEnabled(true);
+      const toggleRow = $('#relayToggleRow'); const toggleSwitch = $('#relaySwitch');
+      if (toggleRow) toggleRow.classList.add('on');
+      if (toggleSwitch) toggleSwitch.classList.add('on');
+      const sub = $('#relayToggleSub'); if (sub) sub.textContent = 'On — this device can carry emergency packets nearby';
+    }
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'Could not request relay permission.';
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/** Entering the relay screen: show real capability and ask the radios to be turned on.
+ *
+ * The request runs inside the click gesture that got us here, so a browser that requires a user
+ * gesture for Web Bluetooth still accepts it. A refusal is reported, never swallowed, and the
+ * Continue button is never blocked by it.
+ */
+async function enterRelayPermissionScreen() {
+  await refreshRelayPermissionUi();
+  const status = await relayPermissionStatus();
+  if (status.nativeRelay || status.bluetoothApi) {
+    try { await handleRelayPermissionRequest(); } catch { /* status text already reflects the outcome */ }
+  }
+}
+
+let registrationInFlight = false;
 async function handleCitizenRegistration() {
   const name = $('#registerName')?.value?.trim() || '';
   const email = $('#registerEmail')?.value?.trim().toLowerCase() || '';
@@ -170,15 +241,24 @@ async function handleCitizenRegistration() {
   const location = $('#registerLocation')?.value || '';
   if (!name) { alert('Enter your full name.'); return false; }
   if (backendConfigured && (!email || password.length < 8)) { alert('Enter a valid email and a password of at least 8 characters.'); return false; }
+  // A double tap on "Create account" used to fire two signups: the first succeeded, the second
+  // returned "user already registered", so the citizen saw a failure for an account that existed.
+  if (registrationInFlight) return false;
+  registrationInFlight = true;
   appState.user.name = name; appState.user.phone = phone; appState.user.registeredLocation = location;
-  if (!backendConfigured) { localStorage.setItem('reach_pwa_profile', JSON.stringify(appState.user)); return true; }
+  if (!backendConfigured) { localStorage.setItem('reach_pwa_profile', JSON.stringify(appState.user)); registrationInFlight = false; return true; }
   try {
     const result = await signup({ email, password, fullName:name, phone });
     localStorage.setItem('reach_pwa_profile', JSON.stringify(appState.user));
     if (!result.access_token) { alert('Account created. Check your email, then use Sign in to continue.'); navigateTo('login'); return false; }
-    await updateProfile({ full_name:name, phone, relay_enabled:appState.relayEnabled });
+    // The account and session already exist; syncing the extra profile fields is best-effort.
+    // A failure here must never read as "account creation failed" — that is what produced the
+    // confusing "Failed to fetch ... then user exists" sequence.
+    try { await updateProfile({ full_name:name, phone, relay_enabled:appState.relayEnabled }); }
+    catch { /* profile sync retried by initBackendSync on the next connection */ }
     return true;
   } catch (error) { alert(error.message || 'Account creation failed.'); return false; }
+  finally { registrationInFlight = false; }
 }
 
 async function handleCitizenLogin() {
@@ -332,12 +412,16 @@ async function enhancedNavHandler(event) {
   const navBtn = event.target.closest('[data-nav]');
   if (!navBtn) return;
   const target = navBtn.getAttribute('data-nav');
-  if (target === 'relaypermission' && appState.currentScreen === 'register') {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    const ok = await handleCitizenRegistration();
-    if (ok) navigateTo(target);
-    return true;
+  if (target === 'relaypermission') {
+    if (appState.currentScreen === 'register') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const ok = await handleCitizenRegistration();
+      if (ok) { navigateTo(target); void enterRelayPermissionScreen(); }
+      return true;
+    }
+    // Reached from home/settings: refresh capability detail for this entry.
+    setTimeout(() => { void enterRelayPermissionScreen(); }, 0);
   }
   if (target === 'contacts') { void renderContacts(); }
   if (target === 'confirm') { void renderCaptureList(); }

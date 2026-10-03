@@ -14,6 +14,22 @@ export const isDemoMode = import.meta.env.VITE_REACH_DEMO_MODE === 'true';
 if (!isBackendConfigured && !isDemoMode) { console.warn('REACH production mode: backend configuration is required; demo fallback is disabled.'); }
 const SESSION_KEY = 'reach_backend_session';
 
+// Bound every request and translate the opaque browser network failure (a CORS rejection or a
+// dead socket surfaces as `TypeError: Failed to fetch`) into something a person can act on.
+const REQUEST_TIMEOUT_MS = 20000;
+export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if ((error as any)?.name === 'AbortError' || (error as any)?.name === 'TimeoutError') {
+      throw new Error('REACH took too long to respond. Check your connection and try again.');
+    }
+    throw new Error('Could not reach REACH. Check your connection and try again.');
+  } finally { clearTimeout(timer); }
+}
+
 function authHeaders(accessToken?: string): Record<string, string> {
   return {
     apikey: SUPABASE_ANON_KEY,
@@ -82,7 +98,7 @@ function sessionFromAuth(data: any): ReachSession {
 export async function refreshSession(): Promise<ReachSession | null> {
   const current = getStoredSession();
   if (!current?.refresh_token) return null;
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
     method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: current.refresh_token }),
   });
@@ -99,7 +115,7 @@ async function ensureSession(): Promise<ReachSession | null> {
 }
 
 export async function loginWithBackend(email: string, password: string): Promise<ReachSession> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
   });
   const data = await res.json().catch(() => ({}));
@@ -108,7 +124,7 @@ export async function loginWithBackend(email: string, password: string): Promise
 }
 
 export async function signupWithBackend(data: { email: string; password: string; full_name: string; phone?: string }): Promise<ReachSession | null> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/signup`, {
     method: 'POST', headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: data.email, password: data.password, data: { full_name: data.full_name, phone: data.phone } }),
   });
@@ -124,7 +140,7 @@ export async function getProfile(accessToken?: string) {
   const session = accessToken ? null : await ensureSession();
   const token = accessToken || session?.access_token;
   if (!token) throw new Error('Authentication required');
-  const res = await fetch(`${API_URL}/me`, { headers: authHeaders(token) });
+  const res = await fetchWithTimeout(`${API_URL}/me`, { headers: authHeaders(token) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Profile not found');
   return data.data;
@@ -140,7 +156,7 @@ export async function logoutBackend(accessToken?: string) {
 export async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const session = await ensureSession();
   const headers = { ...authHeaders(session?.access_token), ...(options.headers || {}) };
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res = await fetchWithTimeout(`${API_URL}${path}`, { ...options, headers });
   if (res.status === 401 && retry && session?.refresh_token) {
     const refreshed = await refreshSession();
     if (refreshed) return apiFetch<T>(path, options, false);
@@ -203,7 +219,7 @@ export async function uploadIncidentEvidence(incidentId: string, kind: string, f
   const hash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
   const storagePath = `${session.user.id}/${hash}.${ext}`;
-  const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/incident-evidence/${storagePath}`, {
+  const upload = await fetchWithTimeout(`${SUPABASE_URL}/storage/v1/object/incident-evidence/${storagePath}`, {
     method: 'POST',
     headers: {
       apikey: SUPABASE_ANON_KEY,
