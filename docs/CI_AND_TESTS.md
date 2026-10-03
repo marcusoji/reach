@@ -10,12 +10,14 @@
 | `npm run test:ai` | Safety Fusion engine + provider adapter (`ai_engine.ts`, `ai_provider.ts`) |
 | `npm run test:relay` | Relay packet verification: canonical form, tampering, fuzz, dedup, BLE framing |
 | `npm run test:pwa-relay` | PWA offline relay queue: TTL expiry, backoff, dead-lettering |
-| `npm run validate:all` | validate + hardening + security + ai + relay + pwa-relay |
+| `npm run test:rpc-contract` | Static check: every Edge Function `rpc()` argument name exists on its SQL function |
+| `npm run test:providers` | Drives the real `ai_provider.ts`/`bmoni.ts` against local stubs (needs `deno`; skips when absent) |
+| `npm run validate:all` | validate + hardening + security + ai + relay + pwa-relay + pwa-evidence + rpc-contract + providers + relay-sim |
 | `npm run build` | `tsc && vite build` |
 
 ## GitHub Actions
 `.github/workflows/ci.yml` — five jobs:
-- `platform` — `npm ci`, then validate, hardening, ai, relay, pwa-relay and the production build.
+- `platform` — `npm ci`, then validate, hardening, ai, relay, pwa-relay, rpc-contract, providers (via `denoland/setup-deno`) and the production build.
 - `pwa` — syntax-checks every PWA JS file and runs `reach-citizen-pwa/js/relay/test-protocol.mjs`.
 - `sql-migrations` — boots `postgis/postgis:16-3.4` and applies every migration for real via `npm run validate:migrations`.
 - `android` — `./gradlew assembleDebug lint` on JDK 17.
@@ -29,6 +31,9 @@
 | `scripts/tests/relay-verify.mjs` | Relay verification, tampering, fuzz, dedup, BLE framing |
 | `scripts/tests/pwa-relay-queue.mjs` | PWA relay queue behaviour under a minimal IndexedDB shim |
 | `scripts/tests/ai-engine.mjs` | Safety Fusion decisions, abstention trace, provider circuit breaker |
+| `scripts/tests/rpc-contract.mjs` | Static Edge Function `rpc()` argument-name check against the SQL signatures |
+| `scripts/tests/live-provider.mjs` | Runs the Deno provider tests (`ai-provider-live.mjs`, `bmoni-client-live.mjs`) against local stubs |
+| `tests/bmoni_webhook_flow.sql` | BMONI webhook → payment/subscription flow against the real migrated schema |
 | `tests/bmoni_webhook_fixtures.mjs` | Signed webhook payloads |
 | `tests/load_incidents_k6.js` | k6 concurrent incidents |
 | `tests/ai_calibration_harness.mjs` | AI evaluation process (needs labelled data) |

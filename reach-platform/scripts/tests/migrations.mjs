@@ -148,3 +148,17 @@ if (rls.status !== 0) {
 }
 const passed = (rls.stdout.match(/^PASS \d+/gm) || []).length;
 console.log(`PASS - tenant isolation suite: ${passed} assertions held (role escalation, cross-institution reads/writes, audit immutability, anon access).`);
+
+// BMONI webhook end-to-end (tests/bmoni_webhook_flow.sql). Exercises the real
+// process_bmoni_webhook_event RPC the Edge Function calls, against the migrated schema, so a
+// change to either side that breaks the sandbox -> payment/subscription path fails here.
+const bmoniSuite = join(here, '..', '..', '..', 'tests', 'bmoni_webhook_flow.sql');
+const bmoni = psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '-f', bmoniSuite]);
+if (bmoni.status !== 0) {
+  const err = (bmoni.stderr || '').split('\n').find((l) => /ERROR/i.test(l)) || bmoni.stderr.trim();
+  console.error('FAIL - BMONI webhook flow suite failed.');
+  console.error(`  ${err.trim()}`);
+  process.exit(1);
+}
+const bmoniPassed = (bmoni.stdout.match(/^PASS \d+/gm) || []).length;
+console.log(`PASS - BMONI webhook flow: ${bmoniPassed} assertions held (success -> paid/active, duplicate ignored, reversal -> cancelled/past_due, unknown proposal rejected).`);

@@ -24,6 +24,11 @@ jobs:
       - run: npm run test:ai
       - run: npm run test:relay
       - run: npm run test:pwa-relay
+      - run: npm run test:rpc-contract
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: npm run test:providers
       - run: npm run build
         env:
           VITE_REACH_DEMO_MODE: 'false'

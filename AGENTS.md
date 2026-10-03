@@ -50,6 +50,12 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - Static text checks in `final-hardening.mjs` pass even when the SQL cannot run — always use `validate:migrations` for schema changes.
 - A migration that aborts mid-file rolls back the whole file; later files then fail on missing functions.
 - `revoke all on public.func(...)` is invalid — it must be `revoke all on function public.func(...)`.
+- PostgREST resolves `rpc('name', { p_x: ... })` named arguments against the SQL function signature. A
+  single stale argument name makes the call fail at runtime with `function ... does not exist` (a 500),
+  not at build time. The BMONI webhook passed a `p_event_type` the RPC never declared, so every payment
+  webhook failed and no sandbox settlement reached the payment records. `scripts/tests/rpc-contract.mjs`
+  now checks every `rpc()` argument name against the SQL signatures statically; `tests/bmoni_webhook_flow.sql`
+  exercises the flow end-to-end on the migrated schema.
 - `text[]` literals need braces: `'{a,b}'`, not `'a,b'`.
 - Granting execute to `authenticated` is intended; only `anon`/PUBLIC access is a defect.
 - `spatial_ref_sys` (PostGIS) is extension-owned and has RLS off by design.
@@ -176,6 +182,12 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   JSON object (`extractLeadingJson`), so a completion that prefixes a sentence or trails a work report
   still yields a usable second opinion; only a completion with no JSON object at all is rejected.
   See `docs/HELIX_API_TEST_NOTES.md` §2.1, §3.6, §3.7.
+- The adapter's live behaviour is pinned by `scripts/tests/ai-provider-live.mjs` (run through
+  `npm run test:providers`), which drives the real `ai_provider.ts` against a stub that reproduces the
+  recorded Helix wire behaviours: bare JSON, agentic JSON + work report, prose served as HTTP 200,
+  credit exhaustion, 4xx/429, unreachable host, and out-of-vocabulary category. Each must map to the
+  right `aiLastFailureKind`. The provider config is env-driven (`REACH_AI_ENDPOINT`/`_API_KEY`/`_MODEL`),
+  the key is read only server-side (never a `VITE_` var), and `/system/health` reports the AI status.
 - The model's contribution is persisted in `ai_assessments.metadata` (migration `0014`), not just the
   audit log. Without it `model_agreement` cannot be queried back and the operator view can only show
   the fused result. The assessment is triggered deliberately by the operator (All Incidents → "Run AI

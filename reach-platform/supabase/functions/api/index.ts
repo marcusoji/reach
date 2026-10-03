@@ -190,7 +190,6 @@ Deno.serve(async (req) => {
     try {
       const result = await service.rpc('process_bmoni_webhook_event', {
         p_event_id: eventId,
-        p_event_type: eventType,
         p_proposal_id: proposalId ? String(proposalId) : null,
         p_provider_transaction_id: providerTransactionId ? String(providerTransactionId) : null,
         p_status: statusRaw,
