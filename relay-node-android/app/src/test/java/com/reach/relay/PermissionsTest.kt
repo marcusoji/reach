@@ -40,8 +40,8 @@ class PermissionsTest {
     }
 
     @Test
-    @Config(sdk = [32])
-    fun `ble advertise is always permitted below api 31`() {
+    @Config(sdk = [30])
+    fun `ble advertise needs no runtime permission below api 31`() {
         // Pre-31 Bluetooth advertising needs no runtime permission; only scan/connect do.
         assertTrue(Permissions.bleAdvertise(context))
     }
