@@ -5,7 +5,10 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    // Must match the API's REACH_ALLOWED_ORIGINS default (and the deploy workflow's fallback):
+    // the browser calls the Edge API cross-origin, so a port the API does not allow makes every
+    // request after sign-in fail as an opaque "Failed to fetch".
+    port: 5173,
     open: false,
   },
 });

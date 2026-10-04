@@ -4,7 +4,7 @@ import { modelAssist, aiLastFailure, aiLastFailureKind, aiCircuitSnapshot } from
 import { bmoni, bmoniConfigured, normalizePhone, bmoniUserIdFrom, findBmoniUserIdByEmail } from './bmoni.ts';
 import { verifyRelayBody } from './relay_verify.ts';
 
-const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500').split(',').map(v => v.trim()).filter(Boolean);
+const allowedOrigins = (Deno.env.get('REACH_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:5500,http://localhost:3000').split(',').map(v => v.trim()).filter(Boolean);
 
 /** Match a request Origin against one allow-list entry.
  *
