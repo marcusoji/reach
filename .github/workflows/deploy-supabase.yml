@@ -35,15 +35,16 @@ jobs:
       # The browser calls the Edge API cross-origin, so a missing or wrong
       # REACH_ALLOWED_ORIGINS makes every request fail with an opaque "Failed to fetch".
       # Prefer the repo secret so real deployments control their own allow-list, but fall back
-      # to the hosted dev/preview origins so a missing secret cannot leave the API refusing
-      # every browser request. Trim the fallback for a real production deployment.
+      # to the hosted dev/preview origins *and the deployed frontends* so a missing secret
+      # cannot leave the API refusing every browser request. Trim the fallback for a real
+      # production deployment.
       - name: Configure API CORS allow-list
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           CONFIGURED_ORIGINS: ${{ secrets.REACH_ALLOWED_ORIGINS }}
         run: |
           set -euo pipefail
-          default_origins="http://localhost:5173,http://localhost:5500,https://*.prod-runtime.all-hands.dev"
+          default_origins="http://localhost:5173,http://localhost:5500,http://localhost:3000,https://*.prod-runtime.all-hands.dev,https://reach-web-mu.vercel.app,https://reach-citizen.vercel.app,https://reach-*-marcus-projects-c5af6f00.vercel.app"
           origins="${CONFIGURED_ORIGINS:-$default_origins}"
           echo "Setting REACH_ALLOWED_ORIGINS for the API."
           supabase secrets set REACH_ALLOWED_ORIGINS="$origins" --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
