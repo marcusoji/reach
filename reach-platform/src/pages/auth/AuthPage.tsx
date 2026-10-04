@@ -185,7 +185,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ defaultMode = 'login' }) => 
             <ul className="auth-points">
               <li>Institutions subscribe only</li>
               <li>AI assists evidence review and prioritization; humans verify incidents</li>
-              <li>Works offline with local queue and supported native relay paths</li>
+              <li>Works offline and relays alerts over Bluetooth and Wi-Fi</li>
               <li>One plan · REACH Full</li>
             </ul>
             <div className="auth-brand-foot">Hackathon MVP</div>

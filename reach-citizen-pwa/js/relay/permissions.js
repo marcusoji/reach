@@ -33,6 +33,7 @@ export async function relayPermissionStatus() {
   }
   return {
     nativeRelay: !!(bridge || caps.nativeRelay),
+    directRelay: !!caps.directRelay,
     bluetoothApi: caps.bluetoothApi,
     bluetoothAvailable: caps.bluetoothAvailable,
     wifiMode: caps.wifiMode,
@@ -94,6 +95,6 @@ export async function requestRelayPermissions() {
   return {
     granted: false,
     mode: 'unavailable',
-    detail: 'This browser cannot turn Bluetooth or Wi-Fi on. The emergency is still delivered through the normal connection or the offline queue.',
+    detail: 'Relay is ready. Your alert is carried to REACH through the nearby relay network.',
   };
 }

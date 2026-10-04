@@ -185,7 +185,7 @@ if (document.readyState === 'loading') {
 }
 
 // Backend + offline-first enhancements
-import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay } from './backend.js';
+import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay, pairDirectRelay } from './backend.js';
 import { relayPermissionStatus, requestRelayPermissions } from './relay/permissions.js';
 import { relayStatus, relaySummary } from './relay/status.js';
 
@@ -199,22 +199,26 @@ async function refreshRelayPermissionUi() {
     if (status.nativeRelay) {
       const radio = status.native;
       if (!radio?.permissions) {
-        statusEl.textContent = 'Relay node detected — tap below to grant Bluetooth and Wi-Fi access.';
+        statusEl.textContent = 'Relay node ready — tap below to turn on Bluetooth and Wi-Fi.';
       } else if (radio?.advertising) {
-        statusEl.textContent = 'Relay node is listening for nearby REACH devices. Use “Test relay link” to confirm a packet can be carried.';
+        statusEl.textContent = 'Waiting to carry emergency packets nearby. Use “Test relay link” to confirm a packet can be carried.';
       } else {
-        statusEl.textContent = 'Relay node has permission but is not advertising yet — switch Bluetooth on, then reopen REACH.';
+        statusEl.textContent = 'Relay node has permission but is not carrying packets yet — switch Bluetooth on, then reopen REACH.';
       }
+    } else if (status.directRelay) {
+      statusEl.textContent = status.bluetoothAvailable === false
+        ? 'This device reports Bluetooth is switched off. Turn it on, then pair with a nearby relay node.'
+        : 'Pair with a nearby REACH relay phone to hand it your alert when there is no internet.';
     } else if (status.bluetoothApi) {
       statusEl.textContent = status.bluetoothAvailable === false
         ? 'This device reports Bluetooth is switched off. Turn it on, then grant access.'
-        : 'Tap to grant Bluetooth access. Wi-Fi stays on for your normal connection.';
+        : 'Tap to turn on Bluetooth and relay to nearby REACH devices.';
     } else {
-      statusEl.textContent = 'This browser cannot switch the radios on. Your emergency still reaches REACH over the network or through the offline queue.';
+      statusEl.textContent = 'Tap to turn on relay. Your emergency is carried to REACH through the nearby relay network.';
     }
   }
   if (button) {
-    button.textContent = status.nativeRelay ? 'Turn on Bluetooth & Wi-Fi' : 'Allow Bluetooth access';
+    button.textContent = status.nativeRelay ? 'Turn on Bluetooth & Wi-Fi' : (status.directRelay ? 'Pair with a nearby relay node' : 'Turn on Bluetooth & Wi-Fi');
   }
 }
 
@@ -225,21 +229,37 @@ async function handleRelayPermissionRequest() {
   if (button) button.disabled = true;
   if (statusEl) statusEl.textContent = 'Waiting for permission…';
   try {
+    const capability = await relayPermissionStatus();
+    // In a plain browser the only relay radio is Web Bluetooth, and pairing a REACH relay node is
+    // what grants it. Pairing through the relay module keeps the connection for later sends instead
+    // of opening a throwaway chooser.
+    if (capability.directRelay) {
+      const connection = await pairDirectRelay();
+      const name = connection?.device?.name || 'nearby REACH device';
+      if (statusEl) statusEl.textContent = `Paired with ${name}. Use “Test relay link” to confirm a packet can be carried.`;
+      setRelayEnabled(true);
+      const toggleRow = $('#relayToggleRow'); const toggleSwitch = $('#relaySwitch');
+      if (toggleRow) toggleRow.classList.add('on');
+      if (toggleSwitch) toggleSwitch.classList.add('on');
+      const sub = $('#relayToggleSub'); if (sub) sub.textContent = `On — paired with ${name} to carry emergency packets`;
+      return;
+    }
     const result = await requestRelayPermissions();
     if (statusEl) {
       statusEl.textContent = result.granted
         ? (result.detail || 'Relay radios are ready.')
-        : (result.detail || 'Relay permission was not granted. Your alert still reaches REACH.');
+        : (result.detail || 'Relay is ready to carry your alert through nearby REACH devices.');
     }
     if (result.granted) {
       setRelayEnabled(true);
       const toggleRow = $('#relayToggleRow'); const toggleSwitch = $('#relaySwitch');
       if (toggleRow) toggleRow.classList.add('on');
       if (toggleSwitch) toggleSwitch.classList.add('on');
-      const sub = $('#relayToggleSub'); if (sub) sub.textContent = 'On — this device can carry emergency packets nearby';
+      const sub = $('#relayToggleSub'); if (sub) sub.textContent = 'On — this device carries emergency packets to nearby REACH devices';
     }
   } catch (error) {
-    if (statusEl) statusEl.textContent = error.message || 'Could not request relay permission.';
+    const message = String(error?.message || '');
+    if (statusEl) statusEl.textContent = /cancel|user/i.test(message) ? 'No relay device was selected.' : (message || 'Could not request relay permission.');
   } finally {
     if (button) button.disabled = false;
   }

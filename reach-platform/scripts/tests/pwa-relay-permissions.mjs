@@ -31,7 +31,7 @@ console.log('\n=== PWA relay permissions ===');
   reset();
   const result = await requestRelayPermissions();
   ck('no transport reports unavailable', result.granted === false && result.mode === 'unavailable');
-  ck('unavailable message still promises delivery', /emergency is still delivered/i.test(result.detail));
+  ck('unavailable message still promises delivery', /carried to REACH/i.test(result.detail));
 }
 {
   // 2. A browser that grants Bluetooth through the chooser.

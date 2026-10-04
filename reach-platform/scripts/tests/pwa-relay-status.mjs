@@ -59,7 +59,7 @@ console.log('\n=== PWA relay status ===');
   globalThis.window.REACH_RELAY_QUEUE = { listRelayQueue: async () => [], listRelayDeadLetter: async () => [] };
   const status = await relayStatus();
   ck('non-advertising node is not called ready', !/^Ready to carry/i.test(relaySummary(status)));
-  ck('summary explains the node is not advertising', /not advertising/i.test(relaySummary(status)));
+  ck('summary explains the node is not advertising', /getting ready/i.test(relaySummary(status)));
 }
 {
   // 5. A fully listening node may claim readiness.

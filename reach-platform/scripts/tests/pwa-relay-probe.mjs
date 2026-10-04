@@ -89,7 +89,7 @@ console.log('\n=== PWA relay link probe ===');
   globalThis.window.REACH_NATIVE_RELAY = { sendPacket: () => JSON.stringify({ accepted: false }) };
   const result = await probeNativeRelay();
   ck('refused probe reports not ok', result.ok === false);
-  ck('refused probe still promises network delivery', /network/i.test(result.detail));
+  ck('refused probe suggests retrying nearby', /try again/i.test(result.detail));
 }
 {
   // 4. Queued but dead-lettered: the packet never left, so this is not a success.
@@ -109,6 +109,16 @@ console.log('\n=== PWA relay link probe ===');
   const result = await probeNativeRelay();
   ck('node without status cannot claim delivery', result.ok === false);
   ck('node without status explains the limit', /cannot report/i.test(result.detail));
+}
+{
+  // 6. No native node but Web Bluetooth present: probe the browser→nearby-node path instead of
+  //    refusing, and still never claim success without a verified ACK.
+  reset();
+  Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, bluetooth: { requestDevice: async () => { throw new Error('User cancelled the requestDevice() chooser.'); } } }, configurable: true, writable: true });
+  const result = await probeNativeRelay();
+  ck('browser probe does not claim there is no node', result.ok === false && !/no relay node/i.test(result.detail));
+  ck('browser probe reports the cancelled chooser', /no relay device was selected/i.test(result.detail));
+  Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true, writable: true });
 }
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);

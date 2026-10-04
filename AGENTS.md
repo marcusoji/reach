@@ -461,6 +461,19 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   queued or stuck instead of a scripted "relaying" claim. The incident-history screen lists only
   the signed-in citizen's own reports, falls back to a local cache offline, and never fabricates
   rows.
+- **A plain browser can hand a packet to a nearby relay node over Web Bluetooth.** `js/relay/direct.js`
+  is the citizen-device half of the relay: it pairs with a nearby Android node's GATT service
+  (`RELAY_SERVICE_UUID`/`_DATA_UUID`/`_ACK_UUID`, shared with `RelayProtocol.kt`), writes the signed
+  packet with the same `[transferId:4][seq:1][total:1]` framing `sendBluetoothPacket` already used,
+  and waits for the node's ACK before claiming delivery. It is foreground-only — Web Bluetooth needs
+  the page open and a user gesture to choose a device, and the web platform has no background radio
+  API — so this is *not* the background relay; the native node owns that. `probeNativeRelay()` falls
+  through to `probeDirectRelay()` when there is no `REACH_NATIVE_RELAY` bridge, and the offline send
+  reuses a pairing made on the relay screen (it never opens a chooser from a send). `capabilities.js`
+  reports `directRelay` and `bluetoothMode:'browser-direct-relay'`, and `status.js` words the home
+  chip honestly. `scripts/tests/pwa-relay-direct.mjs` (CI: `test:pwa-relay-direct`) drives the real
+  module against a fake GATT server. A PWABuilder/TWA package is just Chrome, so it gets this path
+  and nothing more — it has no native relay service, which is what `relay-node-android` provides.
 - **GPS inside the Android app was dead: the WebView denied it.** `MainActivity` set
   `setGeolocationEnabled(false)` and had no `WebChromeClient`, so `navigator.geolocation` in the PWA
   was silently refused; and on API 33+ the split Bluetooth permissions no longer imply location, so

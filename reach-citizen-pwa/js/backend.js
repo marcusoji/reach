@@ -1,6 +1,7 @@
 import { appState } from './state.js';
 import { buildRelayPacket, getRelayIdentity, toServerPacket } from './relay/protocol.js';
 import { detectRelayCapabilities } from './relay/capabilities.js';
+import { directRelayAvailable, directRelayConnection, connectDirectRelay, sendPacketViaDirectRelay, probeDirectRelay } from './relay/direct.js';
 
 const cfg = window.REACH_CONFIG || {};
 const SUPABASE_URL = (cfg.SUPABASE_URL || '').replace(/\/$/, '');
@@ -280,6 +281,22 @@ async function tryNativeRelay(payload,key){
 }
 
 /**
+ * Hand the signed packet to a nearby relay node over Web Bluetooth, when one has already been paired.
+ *
+ * The pairing chooser needs a user gesture, so this only reuses a connection the citizen established
+ * on the relay screen — it never opens a chooser from a send. Delivery is claimed only on the node's
+ * verified ACK; otherwise the caller falls through to the queued gateway path.
+ */
+async function tryDirectRelay(payload,key){
+  if(!directRelayAvailable() || !directRelayConnection()) return null;
+  const built=await buildRelayPacket({packetKey:key,incidentId:null,category:payload.category,priority:payload.priority,title:payload.title,description:payload.description,locationLabel:payload.location_label,locationSource:payload.location_source,locationAccuracyM:payload.location_accuracy_m,latitude:payload.latitude,longitude:payload.longitude});
+  const result=await sendPacketViaDirectRelay(built.packet);
+  if(!result.ok) throw new Error(`Direct relay did not confirm delivery (${result.reason})`);
+  return {status:'relay-queued',packet:built.packet,packetKey:key,packetHash:built.hash,device:result.device,
+    message:`Carried by ${result.device} — it will reach REACH as soon as a connection is available.`};
+}
+
+/**
  * Send a signed probe packet through the native relay node and report what actually happened.
  *
  * sendPacket only *enqueues*: the node deletes a packet only after a verified ACK from a peer (or a
@@ -289,7 +306,12 @@ async function tryNativeRelay(payload,key){
  */
 export async function probeNativeRelay(){
   const bridge=window.REACH_NATIVE_RELAY;
-  if(!bridge || typeof bridge.sendPacket!=='function') return {ok:false,detail:'No relay node is available in this app.'};
+  if(!bridge || typeof bridge.sendPacket!=='function'){
+    // No native node in this app: a plain browser (or a PWABuilder/TWA shell) can still hand a
+    // packet to a nearby relay node over Web Bluetooth, so test that path instead of refusing.
+    if(directRelayAvailable()) return probeDirectRelay();
+    return {ok:false,detail:'No relay node is available in this app.'};
+  }
   const key=`pwa-probe-${crypto.randomUUID()}`;
   const built=await buildRelayPacket({packetKey:key,incidentId:null,category:'test',priority:'low',title:'REACH relay test',description:'Relay link test — no emergency.',locationLabel:'Relay test',locationSource:'manual'});
   const raw=await bridge.sendPacket(JSON.stringify(built.packet));
@@ -297,7 +319,7 @@ export async function probeNativeRelay(){
   if(raw===true||raw==='true') accepted=true;
   else if(typeof raw==='string'){ try{ accepted=JSON.parse(raw)?.accepted===true; }catch{ accepted=false; } }
   else if(raw&&typeof raw==='object'){ accepted=raw.accepted===true; }
-  if(!accepted) return {ok:false,detail:'The relay node did not accept the test packet. Your alert still reaches REACH over the network.'};
+  if(!accepted) return {ok:false,detail:'The relay node did not accept the test packet. Keep both devices nearby and try again.'};
   // Without a way to check the packet's fate we can only say it was queued — not that it was carried.
   if(typeof bridge.packetStatus!=='function') return {ok:false,detail:'The relay node queued the test packet but cannot report whether a nearby device carried it.'};
   const deadline=Date.now()+15000;
@@ -329,6 +351,8 @@ export async function sendOrQueueEmergency(){
   try{
     if(!navigator.onLine){
       try{const relayed=await tryNativeRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Native relay (queued)';localStorage.setItem('reach_relay_packet_key',key);await bindEvidence({reportKey:key});return relayed;}}catch{}
+      // No native bridge: hand the packet to a nearby relay node over Web Bluetooth if one is paired.
+      try{const relayed=await tryDirectRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Nearby relay node';await bindEvidence({reportKey:key});return relayed;}}catch{}
       // No native bridge: queue a signed packet so the gateway can upload it on reconnect.
       try{const queued=await queueSignedRelayPacket(payload,key); if(queued){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Relay gateway (queued)';await bindEvidence({reportKey:key});return {status:'relay-queued',packet:queued};}}catch{}
       throw new Error('OFFLINE');
@@ -354,6 +378,10 @@ export async function getContacts(){return (await api('/contacts')).data;}
 export async function addContact(contact){return (await api('/contacts',{method:'POST',body:JSON.stringify(contact)})).data;}
 export async function deleteContact(id){await api(`/contacts/${encodeURIComponent(id)}`,{method:'DELETE'});}
 export async function getRelayCapabilities(){ return detectRelayCapabilities(); }
+/** Pair with a nearby relay node over Web Bluetooth. Must be called from a user gesture. */
+export async function pairDirectRelay(){ return connectDirectRelay(); }
+/** Send a harmless probe to a nearby relay node and report whether it carried the packet. */
+export async function testDirectRelay(){ return probeDirectRelay(); }
 export function initBackendSync(){const flush=()=>{void flushQueue();void flushRelayQueue();void flushEvidenceQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
 
 /** Attach captures that already have an incident (or a queued report) to attach to. A row whose

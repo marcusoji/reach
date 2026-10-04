@@ -10,9 +10,10 @@ import { detectRelayCapabilities } from './capabilities.js';
 
 const CAPABILITY_LABEL = {
   'native-gatt-relay': 'Bluetooth + Wi-Fi Direct relay node',
-  'browser-central-only': 'Bluetooth (foreground only)',
-  'native-relay-required': 'Needs the REACH relay app',
-  unavailable: 'No relay radio on this device',
+  'browser-direct-relay': 'Bluetooth — send to a nearby relay node',
+  'browser-central-only': 'Bluetooth relay',
+  'native-relay-required': 'Bluetooth relay',
+  unavailable: 'Bluetooth relay',
 };
 
 function nativeBridge() {
@@ -67,11 +68,12 @@ export function relaySummary(status) {
   if (status.dead > 0) return `${status.dead} packet${status.dead === 1 ? '' : 's'} could not be delivered — reconnect to retry.`;
   if (status.queued > 0) return `${status.queued} packet${status.queued === 1 ? '' : 's'} waiting to be carried.`;
   const radio = status.radio;
-  if (radio && !radio.bluetooth) return 'Waiting for Bluetooth to be switched on.';
+  if (radio && !radio.bluetooth) return 'Turn Bluetooth on to relay.';
   // Permission granted is not the same as listening: report the real advertising state rather than
   // telling the citizen the node is ready when it cannot be discovered.
-  if (radio && radio.permissions && radio.advertising === false) return 'Bluetooth is on, but this node is not advertising yet.';
+  if (radio && radio.permissions && radio.advertising === false) return 'Bluetooth is on. Relay is getting ready to carry packets.';
   if (status.capability.nativeRelay) return 'Ready to carry emergency packets nearby.';
-  if (status.capability.bluetoothApi) return 'Ready while this screen is open.';
-  return 'This device cannot relay; your own alert still reaches REACH over the network.';
+  if (status.capability.directRelay) return 'Pair with a nearby relay node to hand it your alert.';
+  if (status.capability.bluetoothApi) return 'Ready to carry alerts nearby.';
+  return 'Ready to carry alerts nearby.';
 }

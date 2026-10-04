@@ -472,6 +472,35 @@ keytool -genkey -v -keystore reach-release.jks -keyalg RSA -keysize 2048 -validi
 
 Keep the keystore and its passwords out of git.
 
+### Browser → relay node (Web Bluetooth) physical test
+
+The PWA can hand an offline alert to a nearby Android relay node over Web Bluetooth
+(`reach-citizen-pwa/js/relay/direct.js`). The framing and UUIDs are unit-tested against a
+fake GATT server (`npm run test:pwa-relay-direct`), but the wire path itself needs two
+physical devices. This is the manual acceptance test:
+
+1. Install the relay APK on phone **A** and open it so it advertises.
+2. On phone **B**, open the REACH PWA (installed as a PWA/TWA, or a normal browser tab)
+   and go to the relay screen. The status line should read “Pair with a nearby relay
+   phone to hand it your alert”.
+3. Tap **Pair with a nearby relay node**. The Web Bluetooth chooser opens; pick phone A.
+   Expected: the button reads “Pair with a nearby relay node”, and **Test relay link**
+   returns “<device> accepted the test packet”.
+4. Put phone B in airplane mode (no internet) and file an incident. Expected: the send
+   reports it was carried by phone A, and no error about the network.
+5. On phone A, confirm the packet is queued; bring it online and confirm it reaches
+   REACH (incident appears, `delivery_method = relay`, `via_relay = true`).
+6. Negative checks: decline the chooser (should say no device selected), and turn
+   phone B's Bluetooth off (should say to turn Bluetooth on). Neither may claim success.
+
+Notes:
+- The page must stay open and foregrounded during the transfer — Web Bluetooth has no
+  background API. If phone B's screen locks, re-open the app and retry.
+- The pairing is remembered for the session, so a later offline send does not open a
+  chooser again. A reload requires re-pairing.
+- If the chooser lists nothing, confirm phone A is advertising (its status says it is
+  carrying packets) and that both phones are within range.
+
 ---
 
 ## 9. Phase 8 — notifications (SMS / USSD / IVR)
