@@ -472,6 +472,18 @@ keytool -genkey -v -keystore reach-release.jks -keyalg RSA -keysize 2048 -validi
 
 Keep the keystore and its passwords out of git.
 
+### Build the APK without a local Android SDK
+
+CI already compiles the relay node on JDK 17. Trigger the `REACH CI` workflow
+(`workflow_dispatch`) with the `reach_citizen_url` input set to the deployed PWA URL
+(include the trailing slash), then download `reach-relay-node-debug-apk` from the run's
+**Artifacts** section. A push to `main`/`develop` also produces the artifact, but with the
+placeholder URL — set the input, or rebuild with `-PreachCitizenUrl`, before installing.
+
+Note: PWABuilder cannot build this APK. It only wraps a hosted PWA into a Trusted Web
+Activity shell, which has no native relay service and no background radios. The relay node
+must be built from `relay-node-android/`.
+
 ### Browser → relay node (Web Bluetooth) physical test
 
 The PWA can hand an offline alert to a nearby Android relay node over Web Bluetooth

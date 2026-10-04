@@ -15,7 +15,10 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties   # local only, git-ignored
 loopback HTTP round trip).
 
 CI job (see `.github/workflows/ci.yml`) runs the same on JDK 17 once the
-wrapper jar is present.
+wrapper jar is present, and uploads the debug APK as the `reach-relay-node-debug-apk`
+artifact. Run the workflow manually (`workflow_dispatch`) with `reach_citizen_url` set to
+your deployed PWA URL to get an installable APK without a local SDK. A plain push builds
+with the placeholder URL, which opens a blank page — set the input for a usable build.
 
 ## Toolchain
 

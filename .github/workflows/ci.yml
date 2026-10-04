@@ -4,6 +4,12 @@ on:
   push:
     branches: [main, master, develop]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      reach_citizen_url:
+        description: 'Deployed PWA URL the relay app loads (must include trailing slash)'
+        required: false
+        default: ''
 
 jobs:
   platform:
@@ -116,7 +122,12 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: chmod +x gradlew
-      - run: ./gradlew assembleDebug lint testDebugUnitTest --stacktrace
+      - run: ./gradlew assembleDebug lint testDebugUnitTest --stacktrace -PreachCitizenUrl=${{ github.event.inputs.reach_citizen_url || 'https://YOUR-REACH-CITIZEN-DOMAIN/' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reach-relay-node-debug-apk
+          path: relay-node-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
 
   security-scripts:
     runs-on: ubuntu-latest
