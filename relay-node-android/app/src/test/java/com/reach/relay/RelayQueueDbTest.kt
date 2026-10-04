@@ -173,4 +173,25 @@ class RelayQueueDbTest {
         q.retry("pkt-00000014", "no_ack", "ble")
         assertFalse(q.deadLetters().any { it.optString("id") == "pkt-00000014" })
     }
+
+    @Test
+    fun `statusOf reports a queued packet and null once delivered`() {
+        // The relay link test polls this: only a verified ACK deletes the row, so a null result is
+        // the only honest proof the packet actually left this device.
+        val q = db()
+        q.enqueue(packet("pkt-00000015"))
+        assertEquals(RelayQueueDb.STATE_PENDING, q.statusOf("pkt-00000015")?.optString("state"))
+        q.success("pkt-00000015")
+        assertEquals(null, q.statusOf("pkt-00000015"))
+    }
+
+    @Test
+    fun `statusOf surfaces the dead-letter reason`() {
+        val q = db()
+        q.enqueue(packet("pkt-00000016"))
+        q.markDead("pkt-00000016", "no_ack")
+        val row = q.statusOf("pkt-00000016")
+        assertEquals(RelayQueueDb.STATE_DEAD, row?.optString("state"))
+        assertEquals("no_ack", row?.optString("last_error"))
+    }
 }

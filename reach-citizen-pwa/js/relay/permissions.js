@@ -61,7 +61,7 @@ export async function requestRelayPermissions() {
           try {
             const status = JSON.parse(bridge.getPermissionStatus());
             if (status?.permissions) {
-              return { granted: true, mode: 'native-relay-node', bluetooth: !!status.bluetooth, wifi: !!status.wifi, detail: 'Relay node ready' };
+              return { granted: true, mode: 'native-relay-node', bluetooth: !!status.bluetooth, wifi: !!status.wifi, detail: status.detail || 'Relay node ready' };
             }
           } catch { /* keep polling */ }
         }

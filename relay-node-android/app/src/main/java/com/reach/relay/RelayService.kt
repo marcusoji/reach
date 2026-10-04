@@ -91,15 +91,19 @@ class RelayService : Service() {
         val adapter = manager.adapter ?: return
         if (!adapter.isEnabled) return
         val service = BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        // Plain permissions, not *_ENCRYPTED_MITM. An MITM-encrypted characteristic cannot be
+        // written over the first, unbonded connection a relay hop always starts with, so every
+        // write was rejected and the transfer could never complete. The packet's own ECDSA
+        // signature is what establishes trust; the link does not need to.
         dataChar = BluetoothGattCharacteristic(
             writeUuid,
             BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED_MITM
+            BluetoothGattCharacteristic.PERMISSION_WRITE
         )
         ackChar = BluetoothGattCharacteristic(
             ackUuid,
             BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED_MITM
+            BluetoothGattCharacteristic.PERMISSION_READ
         )
         val cccd = BluetoothGattDescriptor(
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"),
@@ -175,9 +179,29 @@ class RelayService : Service() {
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(serviceUuid))
+            // The pairing beacon rides in manufacturer-specific data rather than service data: a
+            // 128-bit UUID plus 128-bit service data is 40 bytes and overflows the 31-byte legacy
+            // advertising PDU, which makes startAdvertising fail and the node undiscoverable.
+            // Manufacturer data costs 2 (company id) + 2 (header) + 8 = 12 bytes, so the whole
+            // payload stays inside the budget.
+            .addManufacturerData(RelayProtocol.PAIRING_COMPANY_ID, RelayProtocol.buildPairingBeacon())
             .build()
-        advertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {})
+        advertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {
+            override fun onStartFailure(errorCode: Int) {
+                // Advertising is the *inbound* half of the relay. If it never starts, this node
+                // cannot be discovered, so record it instead of leaving the UI to claim it is
+                // listening. The outbound (scan/connect) half still works.
+                advertiseError = "advertise_failed:$errorCode"
+                advertisingOk = false
+            }
+
+            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+                advertiseError = null
+                advertisingOk = true
+            }
+        })
         running.set(true)
+        isRunning = true
     }
 
     override fun onDestroy() {
@@ -186,6 +210,18 @@ class RelayService : Service() {
         try { advertiser?.stopAdvertising(object : AdvertiseCallback() {}) } catch (_: Exception) {}
         try { gattServer?.close() } catch (_: Exception) {}
         running.set(false)
+        isRunning = false
+        advertisingOk = false
         super.onDestroy()
+    }
+
+    companion object {
+        /**
+         * Process-wide view of the relay so the activity (and the PWA behind it) can report what is
+         * actually happening instead of inferring "listening" from the permission grant alone.
+         */
+        @Volatile internal var isRunning = false
+        @Volatile internal var advertisingOk = false
+        @Volatile internal var advertiseError: String? = null
     }
 }

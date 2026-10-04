@@ -183,6 +183,26 @@ class RelayQueueDb(context: Context) : SQLiteOpenHelper(context, "reach-relay.db
         )
     }
 
+    /**
+     * Delivery state of one packet, for callers that must not guess. A row that has been ACKed is
+     * deleted, so "absent" is the only honest signal that the packet actually left this device.
+     */
+    @Synchronized
+    fun statusOf(id: String): JSONObject? {
+        readableDatabase.rawQuery(
+            "SELECT state,attempts,last_error,last_transport,last_peer FROM relay_queue WHERE id=?",
+            arrayOf(id)
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return JSONObject()
+                .put("state", c.getString(0) ?: STATE_PENDING)
+                .put("attempts", c.getInt(1))
+                .put("last_error", c.getString(2) ?: "")
+                .put("last_transport", c.getString(3) ?: "")
+                .put("last_peer", c.getString(4) ?: "")
+        }
+    }
+
     @Synchronized
     fun deadLetters(limit: Int = 50): List<JSONObject> {
         val out = mutableListOf<JSONObject>()

@@ -77,7 +77,14 @@ class WifiDirectRelay(private val context: Context) {
             if (peer == null) {
                 onComplete(false, null); return@postDelayed
             }
-            val config = WifiP2pConfig().apply { deviceAddress = peer.deviceAddress }
+            // groupOwnerIntent = 0 asks to be the *client*, so the peer becomes the group owner.
+            // That is what makes the transfer work: the ACK server binds on the receiver, and a
+            // client reaches the owner's address — if this node became the owner instead, its own
+            // 127.0.0.1 address would be dialled and the ACK server would never be reached.
+            val config = WifiP2pConfig().apply {
+                deviceAddress = peer.deviceAddress
+                groupOwnerIntent = 0
+            }
             manager.connect(channel, config, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
                     manager.requestConnectionInfo(channel) { info ->
@@ -113,6 +120,9 @@ class WifiDirectRelay(private val context: Context) {
                     }
                 }
                 override fun onFailure(reason: Int) {
+                    // A node that had formed its own autonomous group cannot join another. Drop the
+                    // group so the next attempt (or the peer's) can connect, then report the miss.
+                    try { manager.removeGroup(channel, null) } catch (_: Exception) {}
                     onComplete(false, peer.deviceAddress)
                 }
             })
@@ -124,6 +134,15 @@ class WifiDirectRelay(private val context: Context) {
         // Fail closed: without the Wi-Fi Direct permission the radio is unusable, and binding the
         // listener anyway would advertise a relay path that can never complete a transfer.
         if (manager == null || channel == null || !Permissions.wifiDirect(context)) return
+        // Form an autonomous group and become its owner. Without this the node never joins a group,
+        // so a peer that connects over Wi-Fi Direct has no owner address to reach and the ACK
+        // listener is unreachable — the Wi-Fi half of the relay could never complete a transfer.
+        try {
+            manager.createGroup(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {}
+                override fun onFailure(reason: Int) { /* already in a group, or busy — the listener still binds */ }
+            })
+        } catch (_: Exception) {}
         thread(isDaemon = true, name = "reach-wifi-ack") {
             try {
                 server = ServerSocket(8988).also { it.soTimeout = 0 }
@@ -164,6 +183,8 @@ class WifiDirectRelay(private val context: Context) {
     fun close() {
         try { server?.close() } catch (_: Exception) {}
         server = null
+        // Leave the autonomous group so a later node (or this one, restarted) can form its own.
+        try { manager?.removeGroup(channel, null) } catch (_: Exception) {}
     }
 
     private fun safeUnregister(receiver: BroadcastReceiver) {

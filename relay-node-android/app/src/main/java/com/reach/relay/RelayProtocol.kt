@@ -146,6 +146,51 @@ object RelayProtocol {
         return true
     }
 
+    /**
+     * The advertised pairing beacon.
+     *
+     * Two REACH devices find each other by *service UUID*, which every build shares, so the UUID
+     * alone cannot tell "this is another REACH node" from "this is a different REACH build". The
+     * beacon is a deterministic, non-secret signature of the *relay identity*: the advertising node
+     * derives it from its own device id, and the scanning node can only reproduce it after receiving
+     * that node's signed relay envelope (see [verifyPairingSignature]). Matching it before connecting
+     * is what makes "my phone scans for another phone with the same settings" true rather than
+     * assumed.
+     *
+     * It is deliberately not a secret: it carries no key material and only proves build+identity
+     * agreement, never authenticity. The packet signature remains the trust anchor.
+     */
+    const val PAIRING_CONTEXT = "REACH-RELAY-PAIR-V1"
+
+    /** Beacon length in bytes; sized so UUID + manufacturer data still fit a 31-byte legacy PDU. */
+    const val PAIRING_BEACON_BYTES = 4
+
+    /**
+     * Company id used for the beacon's manufacturer-specific data. 0xFFFF is reserved by the
+     * Bluetooth SIG for testing, so a REACH node never collides with a real vendor's data.
+     */
+    const val PAIRING_COMPANY_ID = 0xFFFF
+
+    fun pairingSignature(): String = pairingSignatureFor(DeviceIdentity.deviceId())
+
+    /** Deterministic beacon for a given relay identity; pure so it can be unit-tested. */
+    fun pairingSignatureFor(deviceId: String): String = sha256("$PAIRING_CONTEXT:$deviceId").take(PAIRING_BEACON_BYTES * 2)
+
+    fun buildPairingBeacon(): ByteArray = pairingSignature().toByteArray(Charsets.US_ASCII)
+
+    /** Returns the beacon string only when it is well formed, so garbage data is ignored. */
+    fun parsePairingBeacon(bytes: ByteArray?): String? {
+        if (bytes == null || bytes.size != PAIRING_BEACON_BYTES * 2) return null
+        val text = String(bytes, Charsets.US_ASCII)
+        return text.takeIf { it.all { c -> c in '0'..'9' || c in 'a'..'f' } }
+    }
+
+    /** True when a peer's beacon matches the signature of the relay identity it signed with. */
+    fun verifyPairingSignature(beacon: String?, deviceId: String): Boolean {
+        if (beacon == null || deviceId.isBlank()) return false
+        return beacon == pairingSignatureFor(deviceId)
+    }
+
     private fun sha256(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 }

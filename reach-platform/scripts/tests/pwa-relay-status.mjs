@@ -52,6 +52,23 @@ console.log('\n=== PWA relay status ===');
   ck('native relay detected', status.capability.nativeRelay === true && status.radio?.bluetooth === false);
   ck('summary asks for Bluetooth', /switch(ed)? on|Bluetooth/i.test(relaySummary(status)));
 }
+{
+  // 4. Permission granted but the node is not advertising: "ready" would be a lie.
+  reset();
+  globalThis.window.REACH_NATIVE_RELAY = { getPermissionStatus: () => JSON.stringify({ permissions: true, bluetooth: true, wifi: true, hotspot: false, service_running: true, advertising: false }) };
+  globalThis.window.REACH_RELAY_QUEUE = { listRelayQueue: async () => [], listRelayDeadLetter: async () => [] };
+  const status = await relayStatus();
+  ck('non-advertising node is not called ready', !/^Ready to carry/i.test(relaySummary(status)));
+  ck('summary explains the node is not advertising', /not advertising/i.test(relaySummary(status)));
+}
+{
+  // 5. A fully listening node may claim readiness.
+  reset();
+  globalThis.window.REACH_NATIVE_RELAY = { getPermissionStatus: () => JSON.stringify({ permissions: true, bluetooth: true, wifi: true, hotspot: false, service_running: true, advertising: true }) };
+  globalThis.window.REACH_RELAY_QUEUE = { listRelayQueue: async () => [], listRelayDeadLetter: async () => [] };
+  const status = await relayStatus();
+  ck('advertising node reports ready', /^Ready to carry/i.test(relaySummary(status)));
+}
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

@@ -10,7 +10,11 @@
   <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-  <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+  <!-- No neverForLocation here: Wi-Fi Direct peer discovery is an API that can reveal the user's
+       surroundings, and Android documents that the flag must not be set for such APIs. With it set,
+       discoverPeers() can fail with a missing-permission error and the Wi-Fi half never connects.
+       BLUETOOTH_SCAN keeps the flag because this app scans only for its own service UUID. -->
+  <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
   <application android:theme="@style/AppTheme" android:label="REACH Relay" android:usesCleartextTraffic="false">

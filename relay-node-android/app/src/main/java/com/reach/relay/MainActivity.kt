@@ -156,6 +156,40 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * A truthful snapshot of the relay node for the PWA.
+     *
+     * `serviceRunning` is read from the real service instance, and `advertising` is false when the
+     * peripheral half failed to start, so the UI can say "listening" only when the node actually is.
+     */
+    internal fun relayStateJson(): String {
+        val granted = relayPermissionsGranted()
+        val bt = bluetoothEnabled()
+        val wifi = wifiEnabled()
+        val hotspot = RelayGatewayUploader.hotspotActive(this)
+        val running = RelayService.isRunning
+        val advertising = running && RelayService.advertisingOk
+        val advertiseError = RelayService.advertiseError
+        val detail = when {
+            !granted -> "Waiting for Bluetooth/Wi-Fi permission"
+            !bt -> "Permission granted — switch Bluetooth on to relay"
+            !running -> "Bluetooth on — relay is starting up"
+            !advertising -> "Bluetooth on — this node is not advertising${advertiseError?.let { " ($it)" } ?: ""}"
+            !wifi -> "Listening on Bluetooth — turn Wi-Fi or hotspot on for the second relay path"
+            else -> "Relay node ready — Bluetooth and Wi-Fi on"
+        }
+        return JSONObject()
+            .put("permissions", granted)
+            .put("bluetooth", bt)
+            .put("wifi", wifi)
+            .put("hotspot", hotspot)
+            .put("service_running", running)
+            .put("advertising", advertising)
+            .put("advertise_error", advertiseError ?: JSONObject.NULL)
+            .put("detail", detail)
+            .toString()
+    }
+
     internal fun requestRuntimePermissions() {
         val required = relayRequiredPermissions().toMutableList()
         required += locationRequiredPermissions()
@@ -220,18 +254,41 @@ class MainActivity : Activity() {
             }
         }
 
-        /** Report the live permission/radio state; never optimistically reports "on". */
+        /**
+         * Delivery state of a packet this app accepted. sendPacket only *enqueues*, so a caller that
+         * wants to know whether the packet actually reached a peer must poll this: a row that has
+         * been ACKed is gone, and `state:"delivered"` means a verified peer ACK or gateway upload.
+         */
+        @JavascriptInterface
+        fun packetStatus(packetKey: String): String {
+            if (!originOk()) return "{\"state\":\"unknown\"}"
+            return try {
+                val row = RelayQueueDb(activity).statusOf(packetKey)
+                if (row == null) JSONObject().put("state", "delivered").toString()
+                else row.put("state", when (row.optString("state")) {
+                    RelayQueueDb.STATE_PENDING -> "pending"
+                    RelayQueueDb.STATE_SENDING -> "sending"
+                    RelayQueueDb.STATE_DEAD -> "dead"
+                    else -> "pending"
+                }).toString()
+            } catch (_: Exception) {
+                "{\"state\":\"unknown\"}"
+            }
+        }
+
+        /** Report the live permission/radio/relay state; never optimistically reports "on". */
         @JavascriptInterface
         fun getPermissionStatus(): String {
             val main = activity as? MainActivity
-            val wifi = main?.wifiEnabled() == true
-            val hotspot = RelayGatewayUploader.hotspotActive(activity)
-            return JSONObject()
-                .put("permissions", main?.relayPermissionsGranted() == true)
-                .put("bluetooth", main?.bluetoothEnabled() == true)
-                .put("wifi", wifi)
-                .put("hotspot", hotspot)
-                .put("detail", permissionDetail(main?.relayPermissionsGranted() == true, main?.bluetoothEnabled() == true, wifi || hotspot))
+            return main?.relayStateJson() ?: JSONObject()
+                .put("permissions", false)
+                .put("bluetooth", false)
+                .put("wifi", false)
+                .put("hotspot", false)
+                .put("service_running", false)
+                .put("advertising", false)
+                .put("advertise_error", JSONObject.NULL)
+                .put("detail", "Relay node unavailable")
                 .toString()
         }
 
@@ -244,28 +301,17 @@ class MainActivity : Activity() {
                 main.requestRuntimePermissions()
                 main.enableRadios()
             }
-            val granted = main?.relayPermissionsGranted() == true
-            val bluetooth = main?.bluetoothEnabled() == true
-            val wifi = main?.wifiEnabled() == true || RelayGatewayUploader.hotspotActive(activity)
+            val state = main?.relayStateJson() ?: return "{\"accepted\":false}"
+            val parsed = JSONObject(state)
             return JSONObject()
-                .put("accepted", granted)
-                .put("bluetooth", bluetooth)
-                .put("wifi", wifi)
-                .put("hotspot", RelayGatewayUploader.hotspotActive(activity))
-                .put("detail", permissionDetail(granted, bluetooth, wifi))
+                .put("accepted", parsed.optBoolean("permissions"))
+                .put("bluetooth", parsed.optBoolean("bluetooth"))
+                .put("wifi", parsed.optBoolean("wifi"))
+                .put("hotspot", parsed.optBoolean("hotspot"))
+                .put("service_running", parsed.optBoolean("service_running"))
+                .put("advertising", parsed.optBoolean("advertising"))
+                .put("detail", parsed.optString("detail"))
                 .toString()
-        }
-
-        /**
-         * Bluetooth is switched on first (the platform shows a dialog), then Wi-Fi. Android does
-         * not let an app flip Wi-Fi on, so the most we can do is open the connectivity panel when
-         * Wi-Fi is off; the wording reflects that instead of claiming both radios are on.
-         */
-        private fun permissionDetail(granted: Boolean, bluetooth: Boolean, wifi: Boolean): String = when {
-            !granted -> "Waiting for Bluetooth/Wi-Fi permission"
-            !bluetooth -> "Permission granted — switch Bluetooth on to relay"
-            !wifi -> "Bluetooth on — turn Wi-Fi or hotspot on for the second relay path"
-            else -> "Relay node ready — Bluetooth and Wi-Fi on"
         }
     }
 }

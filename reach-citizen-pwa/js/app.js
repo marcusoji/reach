@@ -130,6 +130,10 @@ function setupEventDelegation() {
   if (relayEnableButton) {
     relayEnableButton.addEventListener('click', () => { void handleRelayPermissionRequest(); });
   }
+  const relayTestButton = $('#relayTestButton');
+  if (relayTestButton) {
+    relayTestButton.addEventListener('click', () => { void handleRelayLinkTest(); });
+  }
 
   // Category selection rows
   const catList = $('#catList');
@@ -181,7 +185,7 @@ if (document.readyState === 'loading') {
 }
 
 // Backend + offline-first enhancements
-import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession } from './backend.js';
+import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay } from './backend.js';
 import { relayPermissionStatus, requestRelayPermissions } from './relay/permissions.js';
 import { relayStatus, relaySummary } from './relay/status.js';
 
@@ -193,7 +197,14 @@ async function refreshRelayPermissionUi() {
   const status = await relayPermissionStatus();
   if (statusEl) {
     if (status.nativeRelay) {
-      statusEl.textContent = 'Relay node detected — Bluetooth and Wi-Fi can be switched on for you.';
+      const radio = status.native;
+      if (!radio?.permissions) {
+        statusEl.textContent = 'Relay node detected — tap below to grant Bluetooth and Wi-Fi access.';
+      } else if (radio?.advertising) {
+        statusEl.textContent = 'Relay node is listening for nearby REACH devices. Use “Test relay link” to confirm a packet can be carried.';
+      } else {
+        statusEl.textContent = 'Relay node has permission but is not advertising yet — switch Bluetooth on, then reopen REACH.';
+      }
     } else if (status.bluetoothApi) {
       statusEl.textContent = status.bluetoothAvailable === false
         ? 'This device reports Bluetooth is switched off. Turn it on, then grant access.'
@@ -229,6 +240,28 @@ async function handleRelayPermissionRequest() {
     }
   } catch (error) {
     if (statusEl) statusEl.textContent = error.message || 'Could not request relay permission.';
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/**
+ * Prove the relay link end to end, not just that the radios are on.
+ *
+ * A granted permission says nothing about whether a packet can actually be carried, so this sends a
+ * real (harmless, signed) probe packet and reports whether another REACH device accepted it. That is
+ * the difference between "Bluetooth is enabled" and "my alert will get through".
+ */
+async function handleRelayLinkTest() {
+  const statusEl = $('#relayPermissionStatus');
+  const button = $('#relayTestButton');
+  if (button) button.disabled = true;
+  if (statusEl) statusEl.textContent = 'Looking for another REACH device nearby…';
+  try {
+    const result = await probeNativeRelay();
+    if (statusEl) statusEl.textContent = result.detail;
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || 'The relay test could not run.';
   } finally {
     if (button) button.disabled = false;
   }

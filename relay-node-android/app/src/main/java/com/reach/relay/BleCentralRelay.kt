@@ -4,17 +4,20 @@ import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * BLE central: fragment write + wait for ACK characteristic notification/read.
  * Packet is only considered delivered when ACK verifies packet id + hash + accepted.
  */
 @SuppressLint("MissingPermission") // every privileged call is gated by permissions() below
-class BleCentralRelay(private val context: Context, private val onPeer: (Boolean) -> Unit = {}) {
+class BleCentralRelay(
+    private val context: Context,
+    private val onPeer: (Boolean) -> Unit = {},
+) {
     private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private var scanner: BluetoothLeScanner? = null
     private var gatt: BluetoothGatt? = null
@@ -43,6 +46,16 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     private val ackUuid = UUID.fromString(RelayProtocol.ACK_UUID)
     private val handler = Handler(Looper.getMainLooper())
     private val ackTimeout = Runnable { finish(false, null) }
+    // The beacon the scanned peer advertised; verified against its signed relay identity before a
+    // transfer is counted as delivered.
+    private var peerBeacon: String? = null
+
+    /**
+     * The configured instance is owned by a single scan callback, so it must not be re-entered.
+     * [finish] marks the transfer done and a second call is ignored, which would silently drop the
+     * second packet — so a caller holding this instance serialises instead of overlapping.
+     */
+    private val busy = AtomicBoolean(false)
 
     fun discoverAndSend(packet: ByteArray, onComplete: (Boolean) -> Unit = {}) {
         discoverAndSendWithAck(packet, "", "") { ok, _ -> onComplete(ok) }
@@ -55,6 +68,10 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
         onComplete: (Boolean, String?) -> Unit
     ) {
         if (!permissions() || adapter == null || !adapter.isEnabled) {
+            onComplete(false, null); return
+        }
+        // Fail fast rather than let a second transfer be swallowed by the in-flight one.
+        if (!busy.compareAndSet(false, true)) {
             onComplete(false, null); return
         }
         finished = false
@@ -80,6 +97,7 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     private fun finish(ok: Boolean, peer: String?) {
         if (finished) return
         finished = true
+        busy.set(false)
         handler.removeCallbacks(ackTimeout)
         try { scanner?.stopScan(scanCallback) } catch (_: Exception) {}
         try { gatt?.close() } catch (_: Exception) {}
@@ -94,6 +112,11 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(type: Int, result: ScanResult) {
             scanner?.stopScan(this)
+            // Remember the peer's pairing beacon so the ACK can be attributed to a node that
+            // advertised the same relay configuration we did, not merely the same service UUID.
+            // Absent (older build, or a scanner that hides manufacturer data) means "unknown",
+            // which is treated as compatible so mixed versions still interoperate.
+            peerBeacon = RelayProtocol.parsePairingBeacon(result.scanRecord?.getManufacturerSpecificData(RelayProtocol.PAIRING_COMPANY_ID))
             gatt = result.device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         }
     }
@@ -101,12 +124,11 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                // Prefer encrypted link when bonding is available
-                try {
-                    if (Build.VERSION.SDK_INT >= 19) {
-                        g.device.createBond()
-                    }
-                } catch (_: Exception) {}
+                // No createBond() here. Bonding a stranger mid-emergency pops a system pairing dialog
+                // (and, unattended, simply stalls the transfer) while the characteristic permissions
+                // require an *encrypted MITM* link that a first, unbonded connection does not have.
+                // The packet's own ECDSA signature is the trust anchor, so the relay proceeds over a
+                // plain link and no bond is forced.
                 g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 finish(false, null)
@@ -176,6 +198,13 @@ class BleCentralRelay(private val context: Context, private val onPeer: (Boolean
                 RelayProtocol.verifyAck(ack, packetId, packetHash)
             } else {
                 ack.optBoolean("accepted", false)
+            }
+            // Only accept the ACK from a node that advertised the same relay configuration. Without
+            // this the transfer would count as delivered against any device that happened to answer
+            // on the REACH service UUID, including a different build. A peer that advertised no
+            // beacon (older build) is treated as compatible rather than silently dropped.
+            if (ok && peerBeacon != null && !RelayProtocol.verifyPairingSignature(peerBeacon, ack.optString("receiver_device_id"))) {
+                return // timeout will fail the transfer honestly
             }
             finish(ok, peer ?: ack.optString("receiver_device_id"))
         } catch (_: Exception) {

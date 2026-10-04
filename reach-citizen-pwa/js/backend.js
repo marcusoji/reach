@@ -276,6 +276,42 @@ async function tryNativeRelay(payload,key){
   return {status:'relay-queued',packet:built.packet,packetKey:ack.packet_key,packetHash:ack.packet_hash};
 }
 
+/**
+ * Send a signed probe packet through the native relay node and report what actually happened.
+ *
+ * sendPacket only *enqueues*: the node deletes a packet only after a verified ACK from a peer (or a
+ * 2xx gateway upload), so the probe polls the node's queue for the packet's real fate instead of
+ * treating "accepted" as "carried". That is the difference between "the radios are on" and "my
+ * alert will get through", which is the only question that matters when someone needs help.
+ */
+export async function probeNativeRelay(){
+  const bridge=window.REACH_NATIVE_RELAY;
+  if(!bridge || typeof bridge.sendPacket!=='function') return {ok:false,detail:'No relay node is available in this app.'};
+  const key=`pwa-probe-${crypto.randomUUID()}`;
+  const built=await buildRelayPacket({packetKey:key,incidentId:null,category:'test',priority:'low',title:'REACH relay test',description:'Relay link test — no emergency.',locationLabel:'Relay test',locationSource:'manual'});
+  const raw=await bridge.sendPacket(JSON.stringify(built.packet));
+  let accepted=false;
+  if(raw===true||raw==='true') accepted=true;
+  else if(typeof raw==='string'){ try{ accepted=JSON.parse(raw)?.accepted===true; }catch{ accepted=false; } }
+  else if(raw&&typeof raw==='object'){ accepted=raw.accepted===true; }
+  if(!accepted) return {ok:false,detail:'The relay node did not accept the test packet. Your alert still reaches REACH over the network.'};
+  // Without a way to check the packet's fate we can only say it was queued — not that it was carried.
+  if(typeof bridge.packetStatus!=='function') return {ok:false,detail:'The relay node queued the test packet but cannot report whether a nearby device carried it.'};
+  const deadline=Date.now()+15000;
+  let last='pending';
+  while(Date.now()<deadline){
+    await new Promise(r=>setTimeout(r,700));
+    let state;
+    try{ state=JSON.parse(bridge.packetStatus(key))?.state; }catch{ state=undefined; }
+    if(state==='delivered') return {ok:true,detail:'Another REACH device carried the test packet. Your phone can relay alerts.'};
+    if(state==='dead') return {ok:false,detail:'No REACH device could carry the test packet. Keep the app open on both phones and try again.'};
+    if(state) last=state;
+  }
+  return {ok:false,detail:last==='sending'
+    ? 'The test packet is still being sent. Keep the app open on both phones and try again.'
+    : 'No REACH device carried the test packet yet. Keep the app open on both phones and try again.'};
+}
+
 /** Build a signed packet and queue it for the gateway. Returns null when relay is disabled. */
 async function queueSignedRelayPacket(payload,key){
   if(!appState.relayEnabled) return null;

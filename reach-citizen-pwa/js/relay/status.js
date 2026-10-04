@@ -68,6 +68,9 @@ export function relaySummary(status) {
   if (status.queued > 0) return `${status.queued} packet${status.queued === 1 ? '' : 's'} waiting to be carried.`;
   const radio = status.radio;
   if (radio && !radio.bluetooth) return 'Waiting for Bluetooth to be switched on.';
+  // Permission granted is not the same as listening: report the real advertising state rather than
+  // telling the citizen the node is ready when it cannot be discovered.
+  if (radio && radio.permissions && radio.advertising === false) return 'Bluetooth is on, but this node is not advertising yet.';
   if (status.capability.nativeRelay) return 'Ready to carry emergency packets nearby.';
   if (status.capability.bluetoothApi) return 'Ready while this screen is open.';
   return 'This device cannot relay; your own alert still reaches REACH over the network.';
