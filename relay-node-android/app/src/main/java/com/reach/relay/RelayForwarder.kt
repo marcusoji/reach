@@ -70,19 +70,44 @@ object RelayForwarder {
             return
         }
 
-        // Connected node: upload straight to the gateway, no radio hop needed.
-        if (RelayGatewayUploader.isConfigured(context)) {
+        // Connected node: upload straight to the gateway. A node with a configured gateway but no
+        // internet must NOT stay on this branch: the upload would fail every cycle and the packet
+        // would never be tried over the radio. That is exactly the "no network, send, and nothing
+        // goes" case — so only upload when there is connectivity, otherwise fall through to the hop.
+        if (RelayRouting.gatewayRouteAvailable(
+                RelayGatewayUploader.isConfigured(context),
+                RelayGatewayUploader.hasConnectivity(context),
+            )
+        ) {
             db.markSending(id, "gateway", null)
             io.execute {
                 val delivered = RelayGatewayUploader.upload(context, packet)
                 handler.post {
-                    if (delivered) db.success(id) else db.retry(id, "gateway_failed", "gateway")
-                    processNext(context, db, batch, index + 1)
+                    if (delivered) {
+                        db.success(id)
+                        processNext(context, db, batch, index + 1)
+                    } else {
+                        // The uplink dropped between the check and the upload: hand the packet to the
+                        // radio hop before rescheduling, so it still has two ways to get out.
+                        sendViaRadio(context, db, batch, index, id, packet)
+                    }
                 }
             }
             return
         }
 
+        sendViaRadio(context, db, batch, index, id, packet)
+    }
+
+    /** Offer the packet to a nearby peer over BLE, then Wi-Fi Direct, before giving up. */
+    private fun sendViaRadio(
+        context: Context,
+        db: RelayQueueDb,
+        batch: List<Pair<String, JSONObject>>,
+        index: Int,
+        id: String,
+        packet: JSONObject
+    ) {
         val toSend = try {
             RelayProtocol.nextHop(packet)
         } catch (e: Exception) {

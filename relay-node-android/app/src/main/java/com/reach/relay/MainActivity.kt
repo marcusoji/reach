@@ -29,6 +29,9 @@ class MainActivity : Activity() {
     // A WebView geolocation prompt that arrived before the runtime location dialog was answered.
     private var pendingGeoCallback: android.webkit.GeolocationPermissions.Callback? = null
     private var pendingGeoOrigin: String? = null
+    // The connectivity panel is a one-shot hint: opening it on every resume would flash a system
+    // screen over the app each time the citizen returns from anywhere.
+    private var wifiPanelShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -214,8 +217,11 @@ class MainActivity : Activity() {
             }
         }
         // Programmatic Wi-Fi enable is not permitted on modern Android, so the most we can do is
-        // open the connectivity panel — and only when Wi-Fi is actually off, never on every launch.
-        if (!wifiEnabled() && android.os.Build.VERSION.SDK_INT >= 29) {
+        // open the connectivity panel — and only once per launch. Wi-Fi Direct does not need it (it
+        // rides on the radio, not on internet), and re-opening the panel on every resume made the
+        // app unusable, so the panel is a one-shot hint and afterwards the UI just reports the state.
+        if (!wifiEnabled() && android.os.Build.VERSION.SDK_INT >= 29 && !wifiPanelShown) {
+            wifiPanelShown = true
             try { startActivity(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)) } catch (_: Exception) {}
         }
     }

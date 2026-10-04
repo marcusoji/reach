@@ -72,6 +72,14 @@ object RelayGatewayUploader {
     /** Overridable so tests can drive the upload path without a real network. */
     internal var connectivityProbe: (Context) -> Boolean = { hasNetwork(it) }
 
+    /**
+     * Whether a gateway upload can plausibly succeed right now. The drain loop uses this so that a
+     * node with a configured gateway but no internet falls back to the radio hop instead of
+     * retrying an upload that cannot happen — otherwise "send to REACH" with no signal never tries
+     * Bluetooth or Wi-Fi Direct at all.
+     */
+    fun hasConnectivity(context: Context): Boolean = connectivityProbe(context)
+
     /** True only on a 2xx response; any other outcome leaves the packet queued for retry. */
     fun upload(context: Context, packet: JSONObject): Boolean {
         val (base, token, anon) = config(context) ?: return false

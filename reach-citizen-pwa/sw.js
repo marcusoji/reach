@@ -1,4 +1,4 @@
-const CACHE='reach-citizen-v9';
+const CACHE='reach-citizen-v10';
 const ASSETS=['./','./index.html','./css/styles.css','./css/components.css','./css/responsive.css','./js/app.js','./js/navigation.js','./js/state.js','./js/utils.js','./js/backend.js','./js/config.js','./js/evidence.js','./js/relay/protocol.js','./js/relay/capabilities.js','./js/relay/permissions.js','./js/relay/status.js','./assets/icons/reach-logo.svg','./assets/icons/icon-192.png','./assets/icons/icon-512.png','./manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('reach-citizen-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));

@@ -273,7 +273,10 @@ async function tryNativeRelay(payload,key){
     try{ ack=JSON.parse(accepted); if(ack.accepted===false) ok=false; }catch{ /* non-JSON truthy response */ }
   }
   if(!ok) throw new Error('Native relay did not accept the packet');
-  return {status:'relay-queued',packet:built.packet,packetKey:ack.packet_key,packetHash:ack.packet_hash};
+  // The node only enqueues here; the packet is delivered only after a verified ACK from a peer or a
+  // gateway upload. Say that, rather than implying it has already left the device.
+  return {status:'relay-queued',packet:built.packet,packetKey:ack.packet_key,packetHash:ack.packet_hash,
+    message:'Saved and handed to the relay node — it will be carried to REACH as soon as a nearby device or a connection is available.'};
 }
 
 /**
@@ -325,7 +328,7 @@ export async function sendOrQueueEmergency(){
   const payload=buildIncidentPayload(); const key=`pwa-${crypto.randomUUID()}`;
   try{
     if(!navigator.onLine){
-      try{const relayed=await tryNativeRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Native relay';localStorage.setItem('reach_relay_packet_key',key);await bindEvidence({reportKey:key});return relayed;}}catch{}
+      try{const relayed=await tryNativeRelay(payload,key); if(relayed){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Native relay (queued)';localStorage.setItem('reach_relay_packet_key',key);await bindEvidence({reportKey:key});return relayed;}}catch{}
       // No native bridge: queue a signed packet so the gateway can upload it on reconnect.
       try{const queued=await queueSignedRelayPacket(payload,key); if(queued){appState.emergency.incidentId=null;appState.emergency.incidentCode=key.slice(-8).toUpperCase();appState.emergency.deliveryMethod='Relay gateway (queued)';await bindEvidence({reportKey:key});return {status:'relay-queued',packet:queued};}}catch{}
       throw new Error('OFFLINE');

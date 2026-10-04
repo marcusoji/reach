@@ -717,6 +717,10 @@ async function enhancedNavHandler(event) {
     } else if (result.status === 'queued') {
       if (title) title.textContent = 'Relaying your alert';
       if (sub) sub.textContent = 'Saved safely. It will sync when a connection or relay path is available.';
+    } else if (result.status === 'relay-queued') {
+      // Handed to the native relay node, but not yet carried — say so instead of claiming delivery.
+      if (title) title.textContent = 'Handed to the relay node';
+      if (sub) sub.textContent = result.message || 'It will be carried to REACH as soon as a nearby device or a connection is available.';
     }
     navigateTo(target);
     void trackActiveIncident();
