@@ -138,6 +138,14 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   internet/connection, so an imported file is carried over Bluetooth/Wi-Fi Direct by the node rather
   than waiting for a gateway that may never return. With no native bridge the row stays queued.
   `scripts/tests/pwa-relay-queue.mjs` pins both branches.
+- **The relay node owns the alert-file hand-off natively.** The WebView cannot receive a file that
+  arrived by the Android share sheet or a file manager, and its export only saw the PWA's IndexedDB
+  rows — never the packets the node held. `RelayPacketFile` parses/validates/enqueues a
+  `reach-relay-packets` document and re-exports `RelayQueueDb.livePackets()`; `MainActivity` handles
+  `ACTION_SEND`/`ACTION_VIEW` (manifest `singleTop`) so a shared file is queued without the page;
+  and the bridge exposes `importRelayFile`/`exportRelayFile`, which `backend.js` prefers over
+  IndexedDB. Validation is structural only (the gateway still verifies signatures/registration), but
+  a malformed/expired packet is rejected rather than queued, and a re-import is idempotent by `k`.
 - Android BLE fragments must be sized from the negotiated ATT MTU, not a fixed 160 bytes. The default MTU
   is 23, so a write carries at most 20 bytes; `BleCentralRelay` now requests a larger MTU and captures the
   chunk size once per transfer (the MTU callback is async — resizing mid-transfer would desync `total`).

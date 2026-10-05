@@ -69,4 +69,45 @@ class MainActivityLaunchTest {
         org.junit.Assert.assertTrue(result.has("saved"))
         controller.destroy()
     }
+
+    @Test
+    fun `a shared reach alert file is queued without the page`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        RelayQueueDb(context).writableDatabase.delete("relay_queue", null, null)
+        val packet = RelayProtocol.newPacket(
+            org.json.JSONObject()
+                .put("k", "pkt-" + java.util.UUID.randomUUID())
+                .put("incident_id", org.json.JSONObject.NULL)
+                .put("minimal_payload", org.json.JSONObject().put("category", "fire"))
+        )
+        val doc = org.json.JSONObject()
+            .put("format", "reach-relay-packets").put("version", 1)
+            .put("packets", org.json.JSONArray().put(packet))
+            .toString()
+        val file = java.io.File.createTempFile("reach-alert", ".json").apply { writeText(doc) }
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.fromFile(file))
+        }
+        // Android hands a shared file to the activity, not the WebView: the native queue must own it.
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
+        org.junit.Assert.assertTrue(RelayQueueDb(context).livePackets().isNotEmpty())
+        controller.destroy()
+        file.delete()
+    }
+
+    @Test
+    fun `a shared non-reach json file is ignored`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        RelayQueueDb(context).writableDatabase.delete("relay_queue", null, null)
+        val file = java.io.File.createTempFile("not-reach", ".json").apply { writeText("{\"hello\":\"world\"}") }
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.fromFile(file))
+        }
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
+        org.junit.Assert.assertTrue(RelayQueueDb(context).livePackets().isEmpty())
+        controller.destroy()
+        file.delete()
+    }
 }

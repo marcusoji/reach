@@ -203,6 +203,24 @@ class RelayQueueDb(context: Context) : SQLiteOpenHelper(context, "reach-relay.db
         }
     }
 
+    /**
+     * The live (unexpired, non-dead) packets as raw JSON, oldest first — the native half of the
+     * "Save alert file to transfer" export. Expired and dead-lettered rows are excluded because the
+     * gateway would reject them.
+     */
+    @Synchronized
+    fun livePackets(): List<String> {
+        val now = System.currentTimeMillis()
+        val out = mutableListOf<String>()
+        readableDatabase.rawQuery(
+            "SELECT packet FROM relay_queue WHERE state<>? AND expires_at>? ORDER BY created_at",
+            arrayOf(STATE_DEAD, now.toString())
+        ).use { c ->
+            while (c.moveToNext()) out += c.getString(0)
+        }
+        return out
+    }
+
     @Synchronized
     fun deadLetters(limit: Int = 50): List<JSONObject> {
         val out = mutableListOf<JSONObject>()

@@ -429,6 +429,32 @@ can complete on its own.
 a dismissed chooser result, and a parseable save result), 0 lint errors, debug APK built. PWA
 syntax check clean; `validate:all` green (new `pwa-relay-save` 7/7).
 
+## Native alert-file import/export (relay node owns the hand-off)
+
+The file hand-off above still routed the *file* through the WebView's `<input type=file>`: a file
+that arrived by the Android share sheet, a file manager, or a second app never reached the page, so
+it was never queued; and the export only ever contained the PWA's own IndexedDB rows, not the
+packets the node was actually holding (including ones it had received over the radio). The relay
+node now owns both directions natively.
+
+- **`RelayPacketFile`** parses a `reach-relay-packets` document (or a bare packet array), validates
+  each packet with `RelayProtocol.validate`, and enqueues the valid ones into `RelayQueueDb`,
+  skipping a packet already queued (`k`) or expired and rejecting a malformed one. `exportJson`
+  writes the node's live queue back out in the same envelope, so a node can hand a file on.
+- **`RelayQueueDb.livePackets()`** returns unexpired, non-dead rows for the export.
+- **`MainActivity`** handles `ACTION_SEND`/`ACTION_VIEW` (manifest `singleTop` + an
+  `application/json`/`text/plain` `SEND` filter and a `content` `VIEW` filter). A file shared to the
+  app is read and queued natively and the relay service is started, with no page interaction; a
+  non-REACH JSON file is ignored. `onNewIntent` covers the already-running case.
+- **Bridge** gains `importRelayFile(contents)` and `exportRelayFile()` so the PWA can hand the file
+  to the node. `backend.js`'s `importRelayPackets` prefers the native node and falls back to
+  IndexedDB; `exportRelayPackets` returns the node's queue when it is non-empty, else the local rows.
+
+**Verification.** `./gradlew assembleDebug lint testDebugUnitTest` — 115/115 unit tests (new
+`RelayPacketFileTest` 7 and two Robolectric intent tests: a shared REACH file is queued, a shared
+non-REACH JSON file is ignored), 0 lint errors. `validate:all` green (PWA relay export 16/16,
+including the native-queue preference and fallback).
+
 ## Security-desk evidence panel honesty + desk settings (fabricated data)
 
 A UI pass found three places where the platform showed invented operational data rather than what

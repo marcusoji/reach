@@ -144,6 +144,29 @@ console.log('\n=== PWA relay packet export ===');
   const out = await backend.importRelayPackets(file);
   ck('expired packets are skipped on import', out.accepted === 0 && out.skipped === 1 && rows().length === 0, JSON.stringify(out));
 }
+  {
+    // Inside the relay-node app the node owns the durable queue (it holds packets received over the
+    // radio too), so the export must prefer the native queue and the import must be handed to it.
+    idb.clear('reach-offline', RELAY_STORE);
+    globalThis.window.REACH_NATIVE_RELAY = {
+      exportRelayFile: () => JSON.stringify({ format: 'reach-relay-packets', version: 1, exported_at: new Date().toISOString(), packets: [{ k: 'native-1', x: 'a'.repeat(64) }] }),
+      importRelayFile: (text) => {
+        const doc = JSON.parse(text);
+        return JSON.stringify({ accepted: doc.packets.length, skipped: 0, rejected: 0 });
+      },
+    };
+    const exported = await backend.exportRelayPackets();
+    ck('export prefers the native relay queue', exported.packets.length === 1 && exported.packets[0].k === 'native-1');
+    const imported = await backend.importRelayPackets({ packets: [{ k: 'incoming-1' }, { k: 'incoming-2' }] });
+    ck('import is handed to the native node', imported.accepted === 2 && rows().length === 0, JSON.stringify(imported));
+    // A native node with an empty queue must fall back to the local IndexedDB rows.
+    globalThis.window.REACH_NATIVE_RELAY = { exportRelayFile: () => null };
+    await queueOne();
+    const fallback = await backend.exportRelayPackets();
+    ck('empty native queue falls back to the local export', fallback.packets.length === 1, `packets=${fallback.packets.length}`);
+    globalThis.window.REACH_NATIVE_RELAY = undefined;
+  }
+
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 assert.equal(fail, 0, `${fail} relay export assertion(s) failed`);

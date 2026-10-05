@@ -187,6 +187,19 @@ export async function listRelayQueue(){
  * packets are excluded — the gateway would reject them.
  */
 export async function exportRelayPackets(){
+  // Inside the relay-node app the node owns the durable queue, including packets it received over
+  // the radio. Export that when it has anything, so "Save alert file to transfer" hands on what the
+  // node actually holds; fall back to this device's IndexedDB rows otherwise.
+  const bridge=typeof window!=='undefined'?window.REACH_NATIVE_RELAY:null;
+  if(bridge && typeof bridge.exportRelayFile==='function'){
+    try{
+      const raw=bridge.exportRelayFile();
+      if(typeof raw==='string' && raw){
+        const doc=JSON.parse(raw);
+        if(Array.isArray(doc?.packets) && doc.packets.length) return doc;
+      }
+    }catch{ /* fall back to the local queue */ }
+  }
   const rows=await listRelayQueue();
   const now=Date.now();
   const packets=rows
@@ -208,6 +221,16 @@ export async function exportRelayPackets(){
 export async function importRelayPackets(input){
   const list=Array.isArray(input)?input:(Array.isArray(input?.packets)?input.packets:null);
   if(!list) throw new Error('Not a REACH relay packet file.');
+  // Inside the relay-node app the native queue owns delivery, so hand the file to the node and let
+  // it carry the packets; only fall back to this device's IndexedDB queue in a plain browser.
+  const bridge=typeof window!=='undefined'?window.REACH_NATIVE_RELAY:null;
+  if(bridge && typeof bridge.importRelayFile==='function'){
+    try{
+      const raw=bridge.importRelayFile(JSON.stringify(input));
+      const result=typeof raw==='string'?JSON.parse(raw):raw;
+      if(result && typeof result.accepted==='number') return {accepted:result.accepted,skipped:Number(result.skipped||0),rejected:Number(result.rejected||0)};
+    }catch{ /* fall back to the local queue */ }
+  }
   const now=Date.now();
   const db=await openDb();
   const existing=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}).catch(()=>[]);

@@ -66,6 +66,13 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             android.util.Log.w("ReachRelay", "radio prompt failed: ${e.message}")
         }
+        // A cold launch from a shared REACH alert file: queue it now so it is carried even before
+        // the citizen opens the relay screen.
+        try {
+            handleSharedAlertFile(intent)
+        } catch (e: Exception) {
+            android.util.Log.w("ReachRelay", "shared alert file import failed: ${e.message}")
+        }
     }
 
     private fun buildWebView(): WebView {
@@ -399,6 +406,44 @@ class MainActivity : Activity() {
     internal fun wifiEnabled(): Boolean =
         (getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager)?.isWifiEnabled == true
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSharedAlertFile(intent)
+    }
+
+    /**
+     * Accept a REACH alert file that Android handed to this app.
+     *
+     * A citizen can transfer their saved packet file to this phone through the system share sheet or
+     * a file manager. Those arrive as an `ACTION_SEND`/`ACTION_VIEW` intent rather than through the
+     * WebView, so the file is read and queued natively — the relay node then carries it on the next
+     * drain, with no page interaction. A file that is not a REACH packet document is ignored.
+     */
+    private fun handleSharedAlertFile(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_VIEW) return
+        val uri = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+            ?: intent.data
+            ?: return
+        // Only JSON-ish payloads; a random share must not be read into memory.
+        val type = intent.type
+        if (type != null && !type.contains("json") && !type.startsWith("text/")) return
+        val text = try {
+            contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+        } catch (_: Exception) {
+            null
+        } ?: return
+        val head = text.trimStart()
+        if (!head.startsWith("{") && !head.startsWith("[")) return
+        try {
+            val result = RelayPacketFile.importJson(this, text)
+            if (result.accepted > 0) startRelayServiceIfPermitted()
+        } catch (_: Exception) {
+            // Not a REACH packet file; nothing to do.
+        }
+    }
+
     class Bridge(private val activity: Activity, private val allowedHost: String?) {
         private fun originOk(): Boolean {
             // Privileged bridge only usable while loaded host matches allowed REACH origin.
@@ -479,6 +524,44 @@ class MainActivity : Activity() {
             if (!originOk()) return "{\"saved\":false}"
             val main = activity as? MainActivity ?: return "{\"saved\":false}"
             return main.saveTextToDownloads(fileName, contents)
+        }
+
+        /**
+         * Import a REACH alert file that was handed to this device. Inside the app the WebView's
+         * `<input type=file>` can read the file, but a file received through the Android share
+         * sheet (or a second app) never reaches the page — so the page can also pass the text here
+         * and let the native queue own delivery.
+         */
+        @JavascriptInterface
+        fun importRelayFile(contents: String): String {
+            if (!originOk()) return "{\"accepted\":0,\"skipped\":0,\"rejected\":0}"
+            return try {
+                val result = RelayPacketFile.importJson(activity, contents)
+                JSONObject()
+                    .put("accepted", result.accepted)
+                    .put("skipped", result.skipped)
+                    .put("rejected", result.rejected)
+                    .toString()
+            } catch (_: Exception) {
+                "{\"accepted\":0,\"skipped\":0,\"rejected\":0}"
+            }
+        }
+
+        /**
+         * This node's live relay queue as a transferable alert file, or null when there is nothing
+         * to hand on. Lets "Save alert file to transfer" export the packets the node actually holds
+         * (including ones handed to it over the radio), not just the PWA's own IndexedDB rows.
+         */
+        @JavascriptInterface
+        fun exportRelayFile(): String? {
+            if (!originOk()) return null
+            return try {
+                val json = RelayPacketFile.exportJson(activity)
+                val count = JSONObject(json).optJSONArray("packets")?.length() ?: 0
+                if (count == 0) null else json
+            } catch (_: Exception) {
+                null
+            }
         }
 
         /** Request runtime permissions and prompt to enable the radios. Returns a status object. */
