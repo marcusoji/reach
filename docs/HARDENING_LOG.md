@@ -429,3 +429,31 @@ can complete on its own.
 a dismissed chooser result, and a parseable save result), 0 lint errors, debug APK built. PWA
 syntax check clean; `validate:all` green (new `pwa-relay-save` 7/7).
 
+## Security-desk evidence panel honesty + desk settings (fabricated data)
+
+A UI pass found three places where the platform showed invented operational data rather than what
+the record actually contained. An operator acting on a fabricated evidence summary is worse than an
+operator acting on none.
+
+- **`MediaChips` hard-coded a CCTV/telemetry summary.** It rendered "911 Call Audio Stream #8841-A",
+  "CCTV Feed Cam-04" and a specific lat/long geofence for every incident, regardless of what was
+  attached. It now derives its text from the incident's real `evidence.audio/image/video` flags and
+  `locationLabel`, and says "no audio clip / no image / no location is recorded" when the record is
+  empty. The panel is fed the *stored* evidence rows (`GET /evidence?incident_id=…`) via
+  `evidenceFlags`, not the `mapIncident`-derived prop that is always false — so a real capture now
+  shows as attached instead of absent.
+- **The assign-responder dropdown read the wrong field.** `/responders` returns a flat `full_name`
+  (the RPC joins `profiles`), but the dropdown read `r.profiles?.full_name`, so every option was a
+  raw uuid. It now reads `r.full_name`.
+- **The desk-settings page was a working-looking form that persisted nothing.** `teamOnDuty`
+  ("Zone B Security"), `radioChannel` ("CH-3") and an AI auto-push toggle existed only in
+  `INITIAL_DESK_SETTINGS`; no backend path reads them and there is no per-desk settings table. The
+  page now states that per-desk settings are not persisted and shows only the real responder-on-duty
+  count. `DeskSettings` / `INITIAL_DESK_SETTINGS` were dropped from `AppContext`. The hard-coded
+  "Zone C" subtitle on Team On Duty was replaced with a factual one.
+
+**Verification.** `scripts/tests/ui-honesty.mjs` (CI: `test:ui-honesty`, in `validate:all`) pins all
+three: no fabricated CCTV/telemetry strings, the dropdown reads `full_name`, the settings page does
+not render unpersisted values, and the relay-node identity registration / session handoff are
+present. `validate:all` green (121/121 AI, 76/76 migrations, 19/19 RLS, 12/12 ui-honesty, …).
+

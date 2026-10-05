@@ -15,7 +15,7 @@ export const TeamOnDutyPage: React.FC = () => {
       <SectionHeader
         eyebrow="Security Desk"
         title="Team On Duty"
-        subtitle="Active personnel assigned to Zone C dispatch and rapid emergency response."
+        subtitle="Responders registered for this institution and their current duty status."
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

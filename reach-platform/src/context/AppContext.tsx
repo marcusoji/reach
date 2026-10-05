@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Incident, IncidentStatus, StaffMember, StaffTask, InstitutionItem, PaymentRecord, DeskSettings } from '../types';
+import { Incident, IncidentStatus, StaffMember, StaffTask, InstitutionItem, PaymentRecord } from '../types';
 import { INITIAL_INCIDENTS } from '../data/incidents';
 import { INITIAL_STAFF, INITIAL_STAFF_TASKS } from '../data/staff';
 import { INITIAL_INSTITUTIONS, INITIAL_PAYMENT_HISTORY } from '../data/institutions';
-import { INITIAL_DESK_SETTINGS } from '../data/system';
 import { changeIncidentStatus, changeTaskStatus, getInstitutionSummary, isBackendConfigured, isDemoMode, listIncidents, listResponders, listTasks, runAiAssessment, subscribeToIncidentChanges } from '../lib/reachApi';
 
 interface AppContextType {
@@ -19,8 +18,6 @@ interface AppContextType {
   institutions: InstitutionItem[];
   paymentHistory: PaymentRecord[];
   recordPayment: (amount?: string) => void;
-  deskSettings: DeskSettings;
-  updateDeskSettings: <K extends keyof DeskSettings>(key: K, value: DeskSettings[K]) => void;
   backendOnline: boolean;
   refreshIncidents: () => Promise<void>;
 }
@@ -43,7 +40,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [staffTasks, setStaffTasks] = useState<StaffTask[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_STAFF_TASKS : []));
   const [institutions, setInstitutions] = useState<InstitutionItem[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_INSTITUTIONS : []));
   const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_PAYMENT_HISTORY : []));
-  const [deskSettings, setDeskSettings] = useState<DeskSettings>(INITIAL_DESK_SETTINGS);
   const [backendOnline, setBackendOnline] = useState(false);
 
   const refreshIncidents = async () => {
@@ -108,9 +104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void changeTaskStatus(taskId, apiStatus).then(() => refreshIncidents()).catch(() => setBackendOnline(false));
   };
   const recordPayment = (amount = '₦1,450,000.00') => { if (!isBackendConfigured && isDemoMode) setPaymentHistory(prev => [{ id:`pay-${Date.now()}`, date:new Date().toLocaleDateString('en-GB'), code:`PAY-${Date.now().toString().slice(-6)}`, status:'Paid', amount }, ...prev]); };
-  const updateDeskSettings = <K extends keyof DeskSettings>(key: K, value: DeskSettings[K]) => setDeskSettings(prev => ({ ...prev, [key]: value }));
-
-  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, deskSettings, updateDeskSettings, backendOnline, refreshIncidents }}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, backendOnline, refreshIncidents }}>{children}</AppContext.Provider>;
 };
 
 export const useApp = () => { const context = useContext(AppContext); if (!context) throw new Error('useApp must be used within an AppProvider'); return context; };

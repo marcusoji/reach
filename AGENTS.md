@@ -136,10 +136,11 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - Android BLE fragments must be sized from the negotiated ATT MTU, not a fixed 160 bytes. The default MTU
   is 23, so a write carries at most 20 bytes; `BleCentralRelay` now requests a larger MTU and captures the
   chunk size once per transfer (the MTU callback is async — resizing mid-transfer would desync `total`).
-- The PWA and Kotlin BLE fragment headers are still different: `protocol.js` prefixes a 16-byte transfer id
-  (`[id:16][seq:2][total:2]`), while `BleTransfer`/`BleCentralRelay` use `[seq:1][total:1]`. They are only
-  interoperable within a peer group (PWA↔PWA, Android↔Android). Unifying them is a wire-format change; pick
-  one header and update both senders, `BleTransfer`, and the framing tests together.
+- The PWA and Kotlin BLE fragment headers now agree: both `protocol.js`'s `sendBluetoothPacket` and
+  `BleTransfer`/`BleCentralRelay` use `[transferId:4][seq:1][total:1][payload...]` (the PWA previously
+  sent a 16-byte transfer id and 2-byte seq/total, so a browser write could never be reassembled by a
+  native node). A change here is a wire-format change — update the PWA sender, `BleTransfer`, the
+  Android sender, and the framing tests together.
 - `validate:migrations` executes every migration against Postgres+PostGIS and is now run in CI's
   `sql-migrations` job via a `postgis/postgis:16-3.4` service container. It skips (exit 0) when no server is
   reachable, so a local run without Postgres is not a failure.
@@ -584,4 +585,27 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   so the Response Desk showed a fabricated CCTV/telemetry summary for every incident regardless of
   what was actually attached — an operator could act on invented evidence. The panel now derives its
   text from the incident (`evidence.audio/image/location`, `locationLabel`) and says "no audio clip
-  / no image / no location is recorded" when the record is empty.
+  / no image / no location is recorded" when the record is empty. The panel is also fed the *stored*
+  evidence rows (`GET /evidence?incident_id=…`) rather than the derived `evidence` prop, which is
+  left over from `mapIncident` and is always false — so even a real capture would have shown as
+  absent. `ResponseDeskPage` folds the rows through `evidenceFlags` (audio/image/video/location,
+  excluding the `user_report` placeholder). Pinned by `scripts/tests/ui-honesty.mjs`.
+
+- **`/responders` returns a flat `full_name`, not a nested profile.** The assign-responder dropdown
+  read `r.profiles?.full_name`, which is always undefined, so every option rendered as a raw uuid.
+  The endpoint joins the profile server-side and returns `full_name` on the row. `AppContext`'s
+  staff mapping already read `r.full_name`; the dropdown now does too.
+
+- **The desk-settings page was a working-looking form that persisted nothing.** `teamOnDuty`
+  ("Zone B Security"), `radioChannel` ("CH-3") and a toggle for AI auto-push lived only in
+  `INITIAL_DESK_SETTINGS` in `data/system.ts` and were never read by any backend path (there is no
+  per-desk settings table). The page now states plainly that per-desk settings are not persisted and
+  shows only the real responder-on-duty count, instead of a radio channel that does not exist and an
+  auto-push toggle that does nothing. `DeskSettings` and `INITIAL_DESK_SETTINGS` were dropped from
+  the context.
+
+- **`ui-honesty.mjs` is the static guard for these UI defects** (CI: `test:ui-honesty`, wired into
+  `validate:all`). It fails if a fabricated CCTV/telemetry string returns to `MediaChips`, if the
+  responder dropdown stops reading `full_name`, if the desk-settings page renders unpersisted
+  values, or if the relay-node identity registration / session handoff is removed.
+
