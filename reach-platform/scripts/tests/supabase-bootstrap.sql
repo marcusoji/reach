@@ -10,6 +10,12 @@
 -- fixture used to) hides that whole class of production-only failure, so mirror Supabase.
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
+-- PostGIS too: Supabase installs it into `extensions` as well. The migrations `create extension if
+-- not exists postgis` with no schema, which in that fixture installs it in the database default
+-- (public) and hides the same class of failure for geography/geometry. Installing it here first
+-- makes the fixture match Supabase, so a function that pins `search_path=public` and declares a
+-- PostGIS type fails in the local run exactly as it does in production.
+create extension if not exists postgis with schema extensions;
 
 create schema if not exists auth;
 

@@ -455,6 +455,35 @@ node now owns both directions natively.
 non-REACH JSON file is ignored), 0 lint errors. `validate:all` green (PWA relay export 16/16,
 including the native-queue preference and fallback).
 
+## Extension search_path sweep (PostGIS type resolution)
+
+Migration 0020 fixed the two invite RPCs that call pgcrypto `digest()` under `set search_path=public`,
+but the note left a broader sweep open. It found two more, both PostGIS:
+
+- **`create_incident_for_current_user` (0002) could not be created at all on Supabase.**
+  `location geography(point,4326)` is a *type* in a PL/pgSQL declaration, and a type is resolved at
+  CREATE FUNCTION time against the function's own `search_path`. With PostGIS in `extensions`, the
+  declaration fails with `type "geography" does not exist`, which aborts the whole `--single-transaction`
+  file — so every later migration that depends on 0002's objects failed too. This was invisible
+  locally because the fixture created PostGIS in `public`. `0023` cannot repair it (it never runs),
+  so 0002 is edited in place to `set search_path=public, extensions`.
+- **`ingest_relay_packet_service` (0013) failed at run time.** It calls `ST_SetSRID(ST_MakePoint(...))`
+  to store a relayed packet's coordinates; a function call is resolved at execution, so it failed
+  with `type "geography" does not exist` only when a relayed packet with a location arrived — i.e.
+  the offline relay path could not record where the alert came from. It now carries `extensions`.
+
+**Why it stayed hidden.** `scripts/tests/supabase-bootstrap.sql` installed pgcrypto into `extensions`
+(0020) but left PostGIS to the migrations' schema-less `create extension if not exists postgis`,
+which lands in the database default (`public`). The fixture now installs PostGIS into `extensions`
+too, and both `migrations.mjs` and `relay-ingest-sim.mjs` set the database default `search_path` to
+`"$user", public, extensions` (Supabase's) so a schema-less reference resolves the same way it does
+in production. `migrations.mjs` additionally asserts that no SECURITY DEFINER function references
+PostGIS/pgcrypto without `extensions` on its path.
+
+**Verification.** `validate:migrations` green (22 migrations, 30 public tables); `test:relay-sim`
+15/15 including the two cross-institution and relay-identity assertions that previously failed with
+the geography error; `validate:all` green.
+
 ## Security-desk evidence panel honesty + desk settings (fabricated data)
 
 A UI pass found three places where the platform showed invented operational data rather than what

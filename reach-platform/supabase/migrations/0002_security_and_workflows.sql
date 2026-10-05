@@ -139,7 +139,7 @@ end $$;
 -- Incident creation: institution is derived from the authenticated profile unless
 -- a platform operator is acting. This prevents cross-tenant injection.
 create or replace function public.create_incident_for_current_user(p_payload jsonb, p_idempotency_key text)
-returns public.incidents language plpgsql security definer set search_path=public as $$
+returns public.incidents language plpgsql security definer set search_path=public, extensions as $$
 declare
   p public.profiles%rowtype;
   target_institution uuid;

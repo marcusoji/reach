@@ -36,7 +36,7 @@ create or replace function public.ingest_relay_packet_service(
   p_packet jsonb,
   p_actor_id uuid
 ) returns public.relay_packets
-language plpgsql security definer set search_path=public
+language plpgsql security definer set search_path=public, extensions
 as $$
 declare
   r public.relay_packets;

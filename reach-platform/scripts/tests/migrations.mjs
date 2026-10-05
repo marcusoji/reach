@@ -56,6 +56,11 @@ if (created.status !== 0) {
   console.error(created.stderr.trim());
   process.exit(1);
 }
+// Mirror Supabase's default search_path (`"$user", public, extensions`) so an extension function
+// referenced without a schema resolves the same way it does in production. psql opens a fresh
+// connection per invocation, so a database-level default is picked up by every later command.
+psql(['-d', 'postgres', '-c', `alter database ${dbName} set search_path = "$user", public, extensions`]);
+
 
 const run = (file) =>
   psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '--single-transaction', '-f', file]);
@@ -117,6 +122,23 @@ if (/(^|,)(=?authenticated|anon|public)=/.test(acl) || /(^|,)=/.test(acl)) {
 }
 if (!/service_role=/.test(acl)) {
   console.error(`FAIL - legacy ingest_relay_packet is not restricted to service_role (acl: ${acl})`);
+  process.exit(1);
+}
+
+// A SECURITY DEFINER function that pins `set search_path=public` cannot resolve an extension
+// type/function when the extension lives in the `extensions` schema (as on Supabase). A PostGIS
+// *type* in a declaration fails at CREATE FUNCTION (so the migration aborts); an extension
+// *function* call fails only when the function runs. This asserts every SECURITY DEFINER function
+// that references PostGIS/pgcrypto has the extension schema on its path, so neither regression
+// can return.
+const extensionPathCheck = psql(['-d', dbName, '-tAc',
+  `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public' and p.prosecdef
+     and pg_get_functiondef(p.oid) ~ '(ST_[A-Za-z]+\\(|digest\\(|crypt\\(|gen_salt\\(|gen_random_bytes\\(|hmac\\(|::geography|geography\\(|::geometry|geometry\\()'
+     and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) cfg where cfg like 'search_path=%extensions%')`]);
+const missingExtensionPath = extensionPathCheck.stdout.trim().split('\n').filter(Boolean);
+if (missingExtensionPath.length) {
+  console.error(`FAIL - SECURITY DEFINER functions use extension types/functions without 'extensions' on search_path: ${missingExtensionPath.join(', ')}`);
   process.exit(1);
 }
 

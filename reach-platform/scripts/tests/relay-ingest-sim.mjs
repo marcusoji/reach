@@ -40,6 +40,9 @@ if (psql(['-d', 'postgres', '-c', `create database ${dbName}`]).status !== 0) {
   console.error('FAIL - could not create simulation database.');
   process.exit(1);
 }
+// Mirror Supabase's default search_path so schema-less extension references (PostGIS geography,
+// pgcrypto) resolve the way they do in production.
+psql(['-d', 'postgres', '-c', `alter database ${dbName} set search_path = "$user", public, extensions`]);
 const run = (file) => psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '--single-transaction', '-f', file]);
 if (run(bootstrap).status !== 0) { console.error('FAIL - bootstrap'); process.exit(1); }
 for (const f of readdirSync(migrationsDir).filter((x) => x.endsWith('.sql')).sort()) {

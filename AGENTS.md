@@ -216,8 +216,17 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   search_path=public` function cannot resolve `digest()`/`crypt()` unless `extensions` is also on its
   path; 0001's `create extension if not exists pgcrypto` is a no-op there. `0020_fix_pgcrypto_search_path.sql`
   adds `extensions` to the two invite RPCs. `scripts/tests/supabase-bootstrap.sql` now installs pgcrypto
-  into `extensions` so the local run reproduces this class of failure instead of hiding it. A broader
-  sweep for extension functions called from a pinned path is still open.
+  into `extensions` so the local run reproduces this class of failure instead of hiding it.
+  The sweep is complete. A PostGIS **type** in a declaration (`location geography(point,4326)`) is
+  resolved at CREATE FUNCTION time against the function's own path, so 0002's
+  `create_incident_for_current_user` aborted the whole file with `type "geography" does not exist`
+  before any later migration could repair it — that is why the fix is an in-place edit to 0002's
+  `search_path`, not a new migration. `ingest_relay_packet_service` (0013) calls PostGIS at run time
+  and failed only when a relayed packet with coordinates arrived; it now also carries `extensions`.
+  The fixture installs **PostGIS into `extensions`** and both `migrations.mjs` and
+  `relay-ingest-sim.mjs` set the database default `search_path` to `"$user", public, extensions`, so
+  a schema-less extension reference behaves as it does on Supabase. `migrations.mjs` asserts no
+  SECURITY DEFINER function references PostGIS/pgcrypto without `extensions` on its path.
 - `tests/rls_tenant_isolation.sql` seeds profiles with an upsert, not `on conflict do nothing`:
   inserting `auth.users` fires `handle_new_user`, which already creates a `citizen`/NULL-institution
   profile, so a do-nothing insert is a silent no-op and the suite would run entirely as citizens.
