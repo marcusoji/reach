@@ -108,6 +108,31 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - The source-signed payload does not cover `h` (hop count), so `relay_verify.ts` rejects any packet with
   `hop_count > 0` that lacks a relay envelope. A forwarding node always adds a relay signature, and that
   signature does cover `h`. Without this rule a client could upload a packet claiming any hop count.
+- **The Android relay node crashed on launch because the Keystore key pair was initialised with the
+  wrong spec type.** `DeviceIdentity.keyPair()` called `KeyPairGenerator.getInstance("EC",
+  "AndroidKeyStore").initialize(ECGenParameterSpec("secp256r1"))`. The `AndroidKeyStore` provider
+  accepts *only* `KeyGenParameterSpec`; AOSP `AndroidKeyStoreKeyPairGeneratorSpi.initialize()` throws
+  `InvalidAlgorithmParameterException("Unsupported params class: … ECGenParameterSpec …")` for
+  anything else. The throw fired from `RelayProtocol.buildPairingBeacon()` inside
+  `RelayService.startRelay()` → `Service.onCreate`, so the node died exactly when it tried to
+  advertise. Use a `KeyGenParameterSpec.Builder(alias, PURPOSE_SIGN).setAlgorithmParameterSpec(
+  ECGenParameterSpec("secp256r1")).setDigests(DIGEST_SHA256)` and cache the key pair per process.
+  `DeviceIdentityTest` (in `testDebugUnitTest`) exercises the real path — Robolectric has no
+  `AndroidKeyStore` provider, so it also proves the in-memory P-256 fallback works. Never leave
+  `keyPair()` able to throw: it is called on every signature, `deviceId()` and beacon build.
+- **The relay node must come up on whichever radio is available.** `RelayService.onCreate` ran
+  `startForeground`/`startRelay`/`WifiDirectRelay.startAckServer` unguarded, and
+  `startRelayServiceIfPermitted()` required *every* permission (including Wi-Fi Direct's
+  `NEARBY_WIFI_DEVICES`/location) before starting the service. A citizen who declined Wi-Fi got no
+  relay at all, and one transport throwing killed the service. Each transport is now wrapped and the
+  service starts on the Bluetooth grant alone; `MainActivity` catches a broken WebView provider too.
+  `relayStateJson()` reports `permissions` (Bluetooth) and `wifi_permission` separately — do not
+  collapse them back into one gate.
+- **A relay packet imported from a transferred JSON file must reach the radios when offline.**
+  `flushRelayQueue` now calls `handPacketToNativeRelay` for each live row when there is no
+  internet/connection, so an imported file is carried over Bluetooth/Wi-Fi Direct by the node rather
+  than waiting for a gateway that may never return. With no native bridge the row stays queued.
+  `scripts/tests/pwa-relay-queue.mjs` pins both branches.
 - Android BLE fragments must be sized from the negotiated ATT MTU, not a fixed 160 bytes. The default MTU
   is 23, so a write carries at most 20 bytes; `BleCentralRelay` now requests a larger MTU and captures the
   chunk size once per transfer (the MTU callback is async — resizing mid-transfer would desync `total`).

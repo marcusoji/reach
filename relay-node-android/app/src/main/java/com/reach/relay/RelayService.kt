@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelUuid
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -41,12 +42,26 @@ class RelayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(42, buildNotification())
-        startRelay()
-        wifiRelay = WifiDirectRelay(this).also { wr ->
-            wr.startAckServer(this) { packet ->
-                RelayForwarder.enqueue(this, packet)
+        try {
+            startForeground(42, buildNotification())
+        } catch (e: Exception) {
+            Log.w(TAG, "foreground notification failed: ${e.message}")
+        }
+        // Each transport is best-effort: a device that lacks BLE advertising, Wi-Fi Direct or the
+        // right permission must still run whichever half it does have, not crash the whole node.
+        try {
+            startRelay()
+        } catch (e: Exception) {
+            Log.w(TAG, "BLE relay start failed: ${e.message}")
+        }
+        try {
+            wifiRelay = WifiDirectRelay(this).also { wr ->
+                wr.startAckServer(this) { packet ->
+                    RelayForwarder.enqueue(this, packet)
+                }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "Wi-Fi relay start failed: ${e.message}")
         }
         // Periodic purge + drain
         handler.post(object : Runnable {
@@ -56,7 +71,9 @@ class RelayService : Service() {
                     db.purgeExpired()
                     db.recoverStaleSending()
                 } catch (_: Exception) {}
-                RelayForwarder.kick(this@RelayService)
+                try {
+                    RelayForwarder.kick(this@RelayService)
+                } catch (_: Exception) {}
                 handler.postDelayed(this, 30_000L)
             }
         })
@@ -216,6 +233,7 @@ class RelayService : Service() {
     }
 
     companion object {
+        private const val TAG = "ReachRelay"
         /**
          * Process-wide view of the relay so the activity (and the PWA behind it) can report what is
          * actually happening instead of inferring "listening" from the permission grant alone.

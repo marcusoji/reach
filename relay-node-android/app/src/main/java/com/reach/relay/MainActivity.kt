@@ -35,6 +35,36 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A device whose WebView provider is broken throws here. The relay service is the point of
+        // this app, so bring it up regardless and only show the PWA when the WebView works.
+        val view = try {
+            buildWebView()
+        } catch (e: Exception) {
+            android.util.Log.w("ReachRelay", "WebView unavailable: ${e.message}")
+            null
+        }
+        if (view != null) setContentView(view)
+        // The relay node should come up with its radios available: request the runtime
+        // permissions on launch, then switch Bluetooth on (and prompt for Wi-Fi). None of this may
+        // take the app down — the queue and the uplink still work without a radio.
+        try {
+            requestRuntimePermissions()
+        } catch (e: Exception) {
+            android.util.Log.w("ReachRelay", "permission request failed: ${e.message}")
+        }
+        try {
+            startRelayServiceIfPermitted()
+        } catch (e: Exception) {
+            android.util.Log.w("ReachRelay", "relay service start failed: ${e.message}")
+        }
+        try {
+            enableRadios()
+        } catch (e: Exception) {
+            android.util.Log.w("ReachRelay", "radio prompt failed: ${e.message}")
+        }
+    }
+
+    private fun buildWebView(): WebView {
         val view = WebView(this)
         view.settings.javaScriptEnabled = true
         view.settings.domStorageEnabled = true
@@ -81,12 +111,7 @@ class MainActivity : Activity() {
         if (url.startsWith("https://") || url.startsWith("http://localhost") || url.startsWith("http://127.0.0.1")) {
             view.loadUrl(url)
         }
-        setContentView(view)
-        // The relay node should come up with its radios available: request the runtime
-        // permissions on launch, then switch Bluetooth on (and prompt for Wi-Fi).
-        requestRuntimePermissions()
-        startRelayServiceIfPermitted()
-        enableRadios()
+        return view
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -110,9 +135,27 @@ class MainActivity : Activity() {
         startRelayServiceIfPermitted()
     }
 
-    /** True only when every runtime permission the radio transports need is granted. */
-    internal fun relayPermissionsGranted(): Boolean =
-        relayRequiredPermissions().all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+    /** True when the Bluetooth half of the relay can run. */
+    internal fun bleRelayPermissionsGranted(): Boolean =
+        bleRequiredPermissions().all { hasPermission(it) }
+
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    /** The Bluetooth permissions the relay transports need, by OS level. */
+    private fun bleRequiredPermissions(): List<String> = when {
+        android.os.Build.VERSION.SDK_INT >= 31 -> listOf(
+            android.Manifest.permission.BLUETOOTH_SCAN,
+            android.Manifest.permission.BLUETOOTH_CONNECT,
+            android.Manifest.permission.BLUETOOTH_ADVERTISE,
+        )
+        else -> listOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    /** The permission that gates Wi-Fi Direct: NEARBY_WIFI_DEVICES from 33, fine location before. */
+    private fun wifiRequiredPermission(): String =
+        if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.NEARBY_WIFI_DEVICES
+        else android.Manifest.permission.ACCESS_FINE_LOCATION
 
     /** True when the app may read location on the PWA's behalf. */
     internal fun locationPermissionGranted(): Boolean =
@@ -154,7 +197,9 @@ class MainActivity : Activity() {
     )
 
     private fun startRelayServiceIfPermitted() {
-        if (relayPermissionsGranted()) {
+        // Start on the Bluetooth grant alone: whichever radio is available must come up, even if
+        // the citizen declines Wi-Fi. The service itself skips any transport it cannot run.
+        if (bleRelayPermissionsGranted()) {
             startForegroundService(Intent(this, RelayService::class.java))
         }
     }
@@ -166,7 +211,8 @@ class MainActivity : Activity() {
      * peripheral half failed to start, so the UI can say "listening" only when the node actually is.
      */
     internal fun relayStateJson(): String {
-        val granted = relayPermissionsGranted()
+        val granted = bleRelayPermissionsGranted()
+        val wifiGranted = hasPermission(wifiRequiredPermission())
         val bt = bluetoothEnabled()
         val wifi = wifiEnabled()
         val hotspot = RelayGatewayUploader.hotspotActive(this)
@@ -174,10 +220,11 @@ class MainActivity : Activity() {
         val advertising = running && RelayService.advertisingOk
         val advertiseError = RelayService.advertiseError
         val detail = when {
-            !granted -> "Waiting for Bluetooth/Wi-Fi permission"
+            !granted -> "Waiting for Bluetooth permission"
             !bt -> "Permission granted — switch Bluetooth on to relay"
             !running -> "Bluetooth on — relay is starting up"
             !advertising -> "Bluetooth on — this node is not advertising${advertiseError?.let { " ($it)" } ?: ""}"
+            !wifiGranted -> "Listening on Bluetooth — allow nearby Wi-Fi devices for the second relay path"
             !wifi -> "Listening on Bluetooth — turn Wi-Fi or hotspot on for the second relay path"
             else -> "Relay node ready — Bluetooth and Wi-Fi on"
         }
@@ -185,6 +232,7 @@ class MainActivity : Activity() {
             .put("permissions", granted)
             .put("bluetooth", bt)
             .put("wifi", wifi)
+            .put("wifi_permission", wifiGranted)
             .put("hotspot", hotspot)
             .put("service_running", running)
             .put("advertising", advertising)
@@ -202,25 +250,30 @@ class MainActivity : Activity() {
     }
 
     /** Ask the platform to switch the radios on. Android only *prompts* for Bluetooth and Wi-Fi. */
-    // Lint cannot see that relayPermissionsGranted() gates every permission use below.
+    // Lint cannot see that the Bluetooth permission gate guards every privileged use below.
     @SuppressLint("MissingPermission")
     internal fun enableRadios() {
-        if (!relayPermissionsGranted()) return
-        val adapter = bluetoothManager.adapter
-        if (adapter != null && !adapter.isEnabled) {
-            try {
-                @Suppress("DEPRECATION")
-                startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), 9002)
-            } catch (_: Exception) {
-                // Some builds hide the dialog; fall back to the Bluetooth settings screen.
-                try { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) } catch (_: Exception) {}
+        // Bluetooth first, gated only on the Bluetooth grant, so declining Wi-Fi never blocks the
+        // primary relay path from coming up.
+        if (bleRelayPermissionsGranted()) {
+            val adapter = bluetoothManager.adapter
+            if (adapter != null && !adapter.isEnabled) {
+                try {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), 9002)
+                } catch (_: Exception) {
+                    // Some builds hide the dialog; fall back to the Bluetooth settings screen.
+                    try { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) } catch (_: Exception) {}
+                }
             }
         }
         // Programmatic Wi-Fi enable is not permitted on modern Android, so the most we can do is
         // open the connectivity panel — and only once per launch. Wi-Fi Direct does not need it (it
         // rides on the radio, not on internet), and re-opening the panel on every resume made the
         // app unusable, so the panel is a one-shot hint and afterwards the UI just reports the state.
-        if (!wifiEnabled() && android.os.Build.VERSION.SDK_INT >= 29 && !wifiPanelShown) {
+        if (hasPermission(wifiRequiredPermission()) && !wifiEnabled() &&
+            android.os.Build.VERSION.SDK_INT >= 29 && !wifiPanelShown
+        ) {
             wifiPanelShown = true
             try { startActivity(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)) } catch (_: Exception) {}
         }

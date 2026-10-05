@@ -169,6 +169,24 @@ console.log('\n=== PWA relay queue ===');
   const r = await backend.flushRelayQueue();
   ck('dead letters are not retried after recovery', r.sent === 0 && sentBodies.length === 0, `sent=${r.sent}`);
 }
+{
+  // 8. offline with a native relay node: the packet is handed to the node and leaves the queue
+  idb.clear('reach-offline', RELAY_STORE);
+  await offline(); // queues the signed packet locally first (no bridge yet)
+  const bridgeCalls = [];
+  globalThis.window.REACH_NATIVE_RELAY = { sendPacket: (json) => { bridgeCalls.push(JSON.parse(json)); return JSON.stringify({ accepted: true }); } };
+  const r = await backend.flushRelayQueue();
+  ck('offline flush hands the packet to the native relay node', r.relayed === 1 && rows().length === 0, `relayed=${r.relayed} rows=${rows().length}`);
+  ck('the native node received the signed packet', bridgeCalls.length === 1 && Boolean(bridgeCalls[0].k) && Boolean(bridgeCalls[0].source_signature));
+  delete globalThis.window.REACH_NATIVE_RELAY;
+}
+{
+  // 9. offline with no native node: the packet stays queued for a later gateway upload
+  idb.clear('reach-offline', RELAY_STORE);
+  await offline();
+  const r = await backend.flushRelayQueue();
+  ck('offline without a native node keeps the packet queued', r.relayed === 0 && rows().length === 1, `relayed=${r.relayed} rows=${rows().length}`);
+}
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

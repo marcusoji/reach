@@ -195,7 +195,7 @@ if (document.readyState === 'loading') {
 }
 
 // Backend + offline-first enhancements
-import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getProfile, joinInstitution, exportRelayPackets, importRelayPackets, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay, pairDirectRelay } from './backend.js';
+import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getProfile, joinInstitution, exportRelayPackets, importRelayPackets, flushRelayQueue, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay, pairDirectRelay } from './backend.js';
 import { relayPermissionStatus, requestRelayPermissions } from './relay/permissions.js';
 import { relayStatus, relaySummary } from './relay/status.js';
 
@@ -353,9 +353,12 @@ async function handleRelayImport(input) {
   try {
     const text = await file.text();
     const result = await importRelayPackets(JSON.parse(text));
+    // Try to move the packets right away: the gateway when online, or this device's relay radios
+    // when offline, rather than waiting for the next sync tick.
+    if (result.accepted) { try { await flushRelayQueue(); } catch { /* stays queued for the next sync */ } }
     if (statusEl) {
       statusEl.textContent = result.accepted
-        ? `Accepted ${result.accepted} alert packet${result.accepted === 1 ? '' : 's'} — they upload as soon as there is a connection.`
+        ? `Accepted ${result.accepted} alert packet${result.accepted === 1 ? '' : 's'} — sending now, and carried by the relay radios if there is no connection.`
         : (result.skipped ? 'Nothing new in that file (already received or expired).' : 'That file did not contain a usable REACH alert.');
     }
     if (result.accepted) await refreshRelayProgress?.();

@@ -18,7 +18,7 @@ class BleCentralRelay(
     private val context: Context,
     private val onPeer: (Boolean) -> Unit = {},
 ) {
-    private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     private var scanner: BluetoothLeScanner? = null
     private var gatt: BluetoothGatt? = null
     private var dataChar: BluetoothGattCharacteristic? = null

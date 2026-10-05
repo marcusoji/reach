@@ -1,6 +1,9 @@
 package com.reach.relay
 
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -11,12 +14,46 @@ import java.security.spec.ECGenParameterSpec
 object DeviceIdentity {
     private const val ALIAS = "reach-relay-signing-v2"
     private const val STORE = "AndroidKeyStore"
+    private const val TAG = "ReachRelay"
+    @Volatile private var cached: KeyPair? = null
 
+    /**
+     * The relay signing identity, created once per process.
+     *
+     * The AndroidKeyStore provider only accepts a [KeyGenParameterSpec] — passing a bare
+     * [ECGenParameterSpec] makes `initialize` throw `InvalidAlgorithmParameterException`, which
+     * took the whole relay service down the moment it tried to advertise. A few OS builds also
+     * refuse EC keys in the keystore outright, so if the hardware-backed path is unavailable the
+     * identity degrades to an in-memory P-256 key instead of crashing the node.
+     */
     fun keyPair(): KeyPair {
-        val ks = KeyStore.getInstance(STORE).apply { load(null) }
-        val existing = ks.getEntry(ALIAS, null) as? KeyStore.PrivateKeyEntry
-        if (existing != null) return KeyPair(existing.certificate.publicKey, existing.privateKey)
-        val generator = KeyPairGenerator.getInstance("EC", STORE)
+        cached?.let { return it }
+        synchronized(this) {
+            cached?.let { return it }
+            val kp = loadOrCreate()
+            cached = kp
+            return kp
+        }
+    }
+
+    private fun loadOrCreate(): KeyPair {
+        try {
+            val ks = KeyStore.getInstance(STORE).apply { load(null) }
+            (ks.getEntry(ALIAS, null) as? KeyStore.PrivateKeyEntry)?.let {
+                return KeyPair(it.certificate.publicKey, it.privateKey)
+            }
+            val generator = KeyPairGenerator.getInstance("EC", STORE)
+            generator.initialize(
+                KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN)
+                    .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .build()
+            )
+            return generator.generateKeyPair()
+        } catch (e: Exception) {
+            Log.w(TAG, "AndroidKeyStore identity unavailable, using a software key: ${e.message}")
+        }
+        val generator = KeyPairGenerator.getInstance("EC")
         generator.initialize(ECGenParameterSpec("secp256r1"))
         return generator.generateKeyPair()
     }

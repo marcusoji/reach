@@ -100,22 +100,50 @@ export async function createIncident(payload,idempotencyKey){const result=await 
 /** Upload a signed relay packet to the gateway (connected path, no radio hop). */
 export async function sendRelayPacket(packet){const result=await api('/relay/packets',{method:'POST',body:JSON.stringify(toServerPacket(packet,'pwa'))});return result.data;}
 
+/**
+ * Hand a queued signed packet to this device's native relay node.
+ *
+ * The node carries it over Bluetooth/Wi-Fi Direct when there is no internet, and uploads it itself
+ * when a connection returns. Returns true only when the node accepted it; false (never throws) when
+ * there is no native bridge, the relay is disabled, or the node rejected the packet.
+ */
+function handPacketToNativeRelay(packet){
+  try{
+    const bridge=window.REACH_NATIVE_RELAY;
+    if(!bridge || typeof bridge.sendPacket!=='function' || !appState.relayEnabled) return false;
+    const raw=bridge.sendPacket(JSON.stringify(packet));
+    if(raw===false || raw==='false') return false;
+    if(typeof raw==='string'){ try{ return JSON.parse(raw)?.accepted!==false; }catch{ return true; } }
+    if(raw && typeof raw==='object') return raw.accepted!==false;
+    return true;
+  }catch{ return false; }
+}
+
 /** Flush signed relay packets queued while offline. Each item holds {id,packet}.
  * A packet whose own TTL (`packet.e`) has passed is discarded; a send that fails backs off
  * with exponential delay and dead-letters after RELAY_QUEUE_MAX_ATTEMPTS instead of being
- * retried every 30s forever. */
+ * retried every 30s forever.
+ *
+ * With no internet the packet is first offered to this device's native relay node, so a node whose
+ * radios are on actually carries it to a nearby phone instead of waiting for a connection that may
+ * never come. Handing it over deletes the local row: the node now owns delivery. */
 export async function flushRelayQueue(){
-  if(!navigator.onLine || !hasSession()) return {sent:0,remaining:0,dead:0,expired:0};
   const db=await openDb();
   let items=[];
-  try{ items=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}); }catch{ return {sent:0,remaining:0,dead:0,expired:0}; }
+  try{ items=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}); }catch{ return {sent:0,remaining:0,dead:0,expired:0,relayed:0}; }
   const remove=(id)=>new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).delete(id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
   const put=(value)=>new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
-  let sent=0, dead=0, expired=0;
+  const online=navigator.onLine && hasSession();
+  let sent=0, dead=0, expired=0, relayed=0;
   for(const item of items.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))){
     if(item.state==='dead_letter'){ dead++; continue; }
     if(item.nextAttemptAt && item.nextAttemptAt>Date.now()) continue;
     if(Date.now()>=Number(item.packet?.e||0)){ await remove(item.id); expired++; continue; }
+    if(!online){
+      // Offline: the radios are the only way out. A node without one keeps the packet queued.
+      if(handPacketToNativeRelay(item.packet)){ await remove(item.id); relayed++; }
+      continue;
+    }
     try{ await sendRelayPacket(item.packet); await remove(item.id); sent++; }
     catch(err){
       const attempts=Number(item.attempts||0)+1;
@@ -125,7 +153,7 @@ export async function flushRelayQueue(){
     }
   }
   const rows=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);});
-  return {sent,remaining:rows.filter(i=>i.state!=='dead_letter').length,dead,expired};
+  return {sent,relayed,remaining:rows.filter(i=>i.state!=='dead_letter').length,dead,expired};
 }
 function queueRelayPacket(packet){return openDb().then(db=>new Promise((resolve,reject)=>{
   const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();

@@ -364,3 +364,41 @@ idempotent — an existing payer/wallet/onboarding/pending proposal is reused ra
 duplicated, because a second proposal trips the one-active-payment index.
 `scripts/tests/bmoni-demo.mjs` (CI: `test:bmoni-demo`) pins the persona, the unique-phone
 generation and the live/simulated split.
+
+## Android relay node crash fix
+
+The downloaded relay-node APK crashed on launch on real devices. The cause was in the device
+identity, which is created the moment the relay service starts advertising.
+
+- **`DeviceIdentity.keyPair()` passed a bare `ECGenParameterSpec` to the `AndroidKeyStore`
+  `KeyPairGenerator`.** That provider only accepts a `KeyGenParameterSpec`; per AOSP
+  `AndroidKeyStoreKeyPairGeneratorSpi.initialize()` it rejects every other `AlgorithmParameterSpec`
+  with `InvalidAlgorithmParameterException("Unsupported params class: …")`. The throw propagated
+  out of `RelayProtocol.buildPairingBeacon()` → `RelayService.startRelay()` → `Service.onCreate`,
+  so the node died exactly when it tried to advertise. It now initialises with a proper
+  `KeyGenParameterSpec` (`PURPOSE_SIGN`, secp256r1, SHA-256) and caches the key pair per process.
+  A few OS builds still refuse EC keys in the keystore, so the identity degrades to an in-memory
+  P-256 key instead of taking the node down; the public key is still the relay identity and every
+  signature still verifies. `DeviceIdentityTest` exercises the real code path and is in
+  `testDebugUnitTest`.
+- **A single transport could crash the whole service.** `RelayService.onCreate` called
+  `startForeground`, `startRelay` and `WifiDirectRelay.startAckServer` unguarded, so a device
+  without BLE advertising or Wi-Fi Direct (or with a revoked permission) lost the transport it did
+  have. Each transport is now wrapped: whichever radio is available still comes up.
+- **The relay service refused to start unless *every* permission was granted.** Wi-Fi Direct needs
+  `NEARBY_WIFI_DEVICES` (API 33+) / fine location (31–32), and requiring it up front meant a
+  citizen who declined Wi-Fi got no relay at all. The service now starts on the Bluetooth grant
+  alone and skips the Wi-Fi transport when it is not permitted; the status JSON reports the two
+  permissions separately. `MainActivity.onCreate` also catches a broken WebView provider (a known
+  launch crash on some Android 7–9 builds) and still brings the relay up.
+
+**Imported-file handoff.** A signed packet imported from a transferred JSON file now goes to the
+device's native relay node when there is no internet (`flushRelayQueue` → `handPacketToNativeRelay`)
+instead of only waiting for a gateway connection that may never come. The node carries it over
+Bluetooth/Wi-Fi Direct and uploads it itself when a connection returns; with no native bridge the
+packet stays queued as before. `scripts/tests/pwa-relay-queue.mjs` pins both branches (19 assertions).
+
+**Verification.** `./gradlew testDebugUnitTest lint assembleDebug` — 86/86 unit tests, 0 lint
+errors, debug APK built. Platform `validate:all` green (PWA relay 19/19, AI 121/121, relay 73/73,
+all PWA suites).
+
