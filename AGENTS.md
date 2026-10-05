@@ -501,6 +501,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   .buildBody` re-signed a packet with a non-zero hop count using *this* device's key, stamping the
   wrong node as the relay of a hop it did not make. It now uploads an existing relay envelope
   verbatim and only builds one for a hop this node actually performed.
+- **The relay node now survives a reboot.** The foreground service was only ever started from
+  `MainActivity.onCreate`, so after a phone restart the node silently stopped carrying packets until
+  the citizen reopened the app — and a citizen with no internet is exactly the one who cannot be
+  told to. `RelayStartReceiver` restarts the service on `BOOT_COMPLETED` / `MY_PACKAGE_REPLACED` /
+  `QUICKBOOT_POWERON` (`RECEIVE_BOOT_COMPLETED` is declared), but only when a relay permission is
+  held, so it never starts a radio the citizen refused. `RelayService.onStartCommand` returns
+  `START_STICKY` so a memory-pressure kill is restarted too. Both radios are still started together
+  in `onCreate`; the boot receiver is what makes that "background" rather than "until the next
+  reboot".
 - **The Android relay node must register its relay identity or every forwarded packet is refused.**
   `ingest_relay_packet_service` rejects a relay whose `(relay_device_id, relay_public_key)` is not an
   active `device_registrations` row ("Unregistered or revoked relay device"). The PWA self-registers

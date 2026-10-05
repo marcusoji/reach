@@ -40,6 +40,13 @@ class RelayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Ask the platform to restart the node if the process is killed under memory pressure. A node
+     * that silently stops carrying packets is worse than one that never started, because the citizen
+     * still sees "relay active" from the last snapshot.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
     override fun onCreate() {
         super.onCreate()
         try {

@@ -450,7 +450,7 @@ node now owns both directions natively.
   to the node. `backend.js`'s `importRelayPackets` prefers the native node and falls back to
   IndexedDB; `exportRelayPackets` returns the node's queue when it is non-empty, else the local rows.
 
-**Verification.** `./gradlew assembleDebug lint testDebugUnitTest` — 115/115 unit tests (new
+**Verification.** `./gradlew assembleDebug lint testDebugUnitTest` â€” 115/115 unit tests (new
 `RelayPacketFileTest` 7 and two Robolectric intent tests: a shared REACH file is queued, a shared
 non-REACH JSON file is ignored), 0 lint errors. `validate:all` green (PWA relay export 16/16,
 including the native-queue preference and fallback).
@@ -464,12 +464,12 @@ but the note left a broader sweep open. It found two more, both PostGIS:
   `location geography(point,4326)` is a *type* in a PL/pgSQL declaration, and a type is resolved at
   CREATE FUNCTION time against the function's own `search_path`. With PostGIS in `extensions`, the
   declaration fails with `type "geography" does not exist`, which aborts the whole `--single-transaction`
-  file — so every later migration that depends on 0002's objects failed too. This was invisible
+  file â€” so every later migration that depends on 0002's objects failed too. This was invisible
   locally because the fixture created PostGIS in `public`. `0023` cannot repair it (it never runs),
   so 0002 is edited in place to `set search_path=public, extensions`.
 - **`ingest_relay_packet_service` (0013) failed at run time.** It calls `ST_SetSRID(ST_MakePoint(...))`
   to store a relayed packet's coordinates; a function call is resolved at execution, so it failed
-  with `type "geography" does not exist` only when a relayed packet with a location arrived — i.e.
+  with `type "geography" does not exist` only when a relayed packet with a location arrived â€” i.e.
   the offline relay path could not record where the alert came from. It now carries `extensions`.
 
 **Why it stayed hidden.** `scripts/tests/supabase-bootstrap.sql` installed pgcrypto into `extensions`
@@ -483,6 +483,28 @@ PostGIS/pgcrypto without `extensions` on its path.
 **Verification.** `validate:migrations` green (22 migrations, 30 public tables); `test:relay-sim`
 15/15 including the two cross-institution and relay-identity assertions that previously failed with
 the geography error; `validate:all` green.
+
+## Relay node survives a reboot (background relay)
+
+The relay node's radios are started from `MainActivity.onCreate`, so they were only "active in the
+background" until the next reboot: after a phone restart nothing restarted `RelayService`, and the
+node silently stopped carrying packets until the citizen reopened the app. That is the wrong failure
+mode for the one user who has no internet â€” the person who cannot be told to reopen it.
+
+- `RelayStartReceiver` restarts the foreground service on `BOOT_COMPLETED`, `MY_PACKAGE_REPLACED` and
+  `QUICKBOOT_POWERON`. It acts only when a relay permission is actually held, so it never starts a
+  radio the citizen refused, and it swallows any start failure (a broadcast must not crash the app on
+  boot). `RECEIVE_BOOT_COMPLETED` is declared.
+- `RelayService.onStartCommand` returns `START_STICKY`, so a process killed under memory pressure is
+  restarted by the platform as well.
+- Both radios were already started together in `onCreate` (`startRelay()` for BLE and
+  `WifiDirectRelay.startAckServer` for Wi-Fi), so no change was needed there; the boot receiver is
+  what makes that genuinely background.
+
+**Verification.** `RelayStartReceiverTest` (Robolectric, API 30/33) pins: a boot broadcast without a
+relay grant leaves the node stopped, a non-boot broadcast and a null intent are ignored, and a boot
+broadcast with the Bluetooth grant is handled without throwing. Android unit tests 123/123, lint
+clean, debug APK builds.
 
 ## Security-desk evidence panel honesty + desk settings (fabricated data)
 
