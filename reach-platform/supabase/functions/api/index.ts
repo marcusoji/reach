@@ -658,7 +658,9 @@ Deno.serve(async (req) => {
 
     if (path === '/institutions' && req.method === 'GET') {
       if (!['operator', 'super-admin'].includes(profile.role)) return json({ error: 'Not permitted' }, 403);
-      const { data, error } = await supabase.from('institutions').select('id,name,category,city,address,timezone,created_at,updated_at').order('created_at', { ascending: false });
+      // The embedded subscription status is what the operator's Active/Grace/Inactive filter reads;
+      // without it every row had no status and fell through to a hard-coded 'Active'.
+      const { data, error } = await supabase.from('institutions').select('id,name,category,city,address,timezone,created_at,updated_at,subscriptions(status,plan_name)').order('created_at', { ascending: false });
       if (error) throw error;
       return json({ data: data ?? [] });
     }

@@ -402,3 +402,30 @@ packet stays queued as before. `scripts/tests/pwa-relay-queue.mjs` pins both bra
 errors, debug APK built. Platform `validate:all` green (PWA relay 19/19, AI 121/121, relay 73/73,
 all PWA suites).
 
+## Relay file hand-off inside the Android app (WebView file save/open)
+
+The offline hand-off story ("save the signed alert JSON on the phone, then transfer it over
+Bluetooth or Wi-Fi to a relay node") was only half-wired inside the relay-node app. The PWA's
+**Save alert file to transfer** used the Web Share API with a blob-download fallback, and
+**Receive an alert file** used an `<input type=file>` — neither of which the app's `WebView`
+can complete on its own.
+
+- **The WebView had no `onShowFileChooser`.** Tapping "Receive an alert file" (and the evidence
+  capture inputs on the review screen) did nothing inside the app: the file input never opened.
+  `MainActivity` now answers `onShowFileChooser`, opens the system picker, and returns the result
+  through `onActivityResult`; a dismissed picker is answered with an empty result so the input is
+  never left stuck. A stale in-flight callback is cancelled before a new chooser opens.
+- **The WebView cannot complete a blob download or a share sheet.** "Save alert file to transfer"
+  now calls a native `saveExportFile` bridge when it is present, which writes the JSON into the
+  device's Downloads (MediaStore on API 29+, the app's external Downloads directory below that)
+  and returns `{saved, location}` for the status line. In a plain browser the share sheet and the
+  blob download are unchanged. A `DownloadListener` also handles a `data:`/`http(s)` download the
+  page might trigger, so such a tap is not silently dropped.
+- A signed packet saved this way is transferred by the phone's own file-transfer channel
+  (Bluetooth share, Wi-Fi Direct share, USB) to another device, which imports it — the receiving
+  half already goes to that device's relay node or gateway (`flushRelayQueue`).
+
+**Verification.** `./gradlew assembleDebug lint testDebugUnitTest` — 96/96 unit tests (two new:
+a dismissed chooser result, and a parseable save result), 0 lint errors, debug APK built. PWA
+syntax check clean; `validate:all` green (new `pwa-relay-save` 7/7).
+

@@ -41,6 +41,7 @@ jobs:
       - run: npm run test:pwa-evidence
       - run: npm run test:pwa-estate-join
       - run: npm run test:pwa-relay-export
+      - run: npm run test:pwa-relay-save
       - run: npm run test:rpc-contract
       - run: npm run test:bmoni-phone
       - run: npm run test:bmoni-uid

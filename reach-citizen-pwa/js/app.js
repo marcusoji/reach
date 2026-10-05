@@ -318,6 +318,22 @@ async function handleRelayExport() {
     }
     const name = `reach-alert-${new Date().toISOString().slice(0,10)}.json`;
     const text = JSON.stringify(payload, null, 2);
+    // Inside the native relay-node app the WebView has no share sheet and cannot complete a blob
+    // download, so the file is written natively into Downloads. In a plain browser the share sheet
+    // is preferred (it can hand the file straight to a Bluetooth/Wi-Fi transfer app), with a plain
+    // download as the fallback.
+    const native = window.REACH_NATIVE_RELAY;
+    if (native && typeof native.saveExportFile === 'function') {
+      const raw = native.saveExportFile(name, text);
+      let result = {};
+      try { result = JSON.parse(raw || '{}'); } catch { /* treat as unsaved */ }
+      if (statusEl) {
+        statusEl.textContent = result.saved
+          ? `Saved ${payload.packets.length} alert packet${payload.packets.length === 1 ? '' : 's'} to ${result.location || 'Downloads'}. Open your file manager to send it to a REACH relay phone.`
+          : 'The alert file could not be saved on this device.';
+      }
+      return;
+    }
     const file = new File([text], name, { type: 'application/json' });
     if (navigator.canShare?.({ files: [file] })) {
       await navigator.share({ files: [file], title: 'REACH alert packet', text: 'Signed REACH relay packets — hand these to a relay node.' });

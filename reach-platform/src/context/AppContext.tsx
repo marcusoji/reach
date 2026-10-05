@@ -58,6 +58,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         status:t.status === 'on_scene' ? 'On Scene' : t.status === 'completed' ? 'Resolved' : t.status === 'responding' ? 'Responding' : t.status === 'accepted' ? 'Accepted' : 'Assigned',
         checklist:[{id:'accept',label:'Accept assignment',completed:['accepted','responding','on_scene','completed'].includes(t.status)},{id:'arrive',label:'Confirm on scene',completed:['on_scene','completed'].includes(t.status)}],
       })));
+      // The billing summary is institution-scoped: it 403s for every other role and for an
+      // institution with no billing row. That is not "the backend is down", so it is kept out of the
+      // outer try — a failure here must not flip the shared `backendOnline` flag to false and make
+      // every portal claim the backend is unavailable.
+      setBackendOnline(true);
       try {
           const summary = await getInstitutionSummary();
           const inst = summary.data.institution;
@@ -65,7 +70,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setInstitutions([{ id:inst.id, code:inst.id.slice(0,8).toUpperCase(), name:inst.name, category:inst.category, plan:sub?.plan_name || 'REACH Full', status:sub?.status === 'active' ? 'Active' : sub?.status === 'trial' ? 'Grace' : 'Inactive', coverageCount:summary.data.members.length, residentsCount:summary.data.members.filter((m:any)=>m.membership_role==='citizen').length, staffCount:summary.data.members.filter((m:any)=>m.membership_role==='staff').length, securityCount:summary.data.members.filter((m:any)=>m.membership_role==='security-desk').length, nextCharge:sub?.current_period_end || '—', paymentApi:sub?.provider || 'BMONI Embedded', gracePeriod:sub?.status || 'trial' }]);
           setPaymentHistory((summary.data.payments || []).map((p:any) => ({ id:p.id, date:new Date(p.created_at).toLocaleDateString('en-GB'), code:p.provider_reference || p.id.slice(0,8), status:p.status === 'paid' ? 'Paid' : p.status === 'failed' ? 'Failed' : 'Pending', amount:p.amount ? `₦${Number(p.amount).toLocaleString()}` : undefined })));
         } catch { /* non-institution roles or unconfigured billing */ }
-      setBackendOnline(true);
     } catch { setBackendOnline(false); }
   };
 

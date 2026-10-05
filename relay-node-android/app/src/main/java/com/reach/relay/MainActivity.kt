@@ -26,9 +26,13 @@ class MainActivity : Activity() {
         }
     }
     private val permissionRequestId = 9001
+    private val fileChooserRequestId = 9003
     // A WebView geolocation prompt that arrived before the runtime location dialog was answered.
     private var pendingGeoCallback: android.webkit.GeolocationPermissions.Callback? = null
     private var pendingGeoOrigin: String? = null
+    // The in-flight <input type=file> callback. Without answering this, a file input in the PWA
+    // (the relay "Receive an alert file" import, or an evidence capture) does nothing inside the app.
+    private var filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
     // The connectivity panel is a one-shot hint: opening it on every resume would flash a system
     // screen over the app each time the citizen returns from anywhere.
     private var wifiPanelShown = false
@@ -85,6 +89,22 @@ class MainActivity : Activity() {
             }
         }
         view.addJavascriptInterface(Bridge(this, allowedHost), "REACH_NATIVE_RELAY")
+        // A data:/http(s) download started by the page has no handler without this, so the tap
+        // would silently do nothing. The relay export prefers the share sheet and falls back to a
+        // download; in a browser that fallback is the browser's own download manager.
+        view.setDownloadListener { url, _, _, mimeType, _ ->
+            try {
+                val uri = android.net.Uri.parse(url)
+                val intent = when (uri.scheme) {
+                    "data" -> Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, mimeType ?: "*/*") }
+                    "http", "https" -> Intent(Intent.ACTION_VIEW, uri)
+                    else -> null
+                }
+                if (intent != null) startActivity(Intent.createChooser(intent, "Save file"))
+            } catch (_: Exception) {
+                // No viewer available for the download; nothing to do.
+            }
+        }
         // The citizen PWA reads GPS through the WebView. Without a WebChromeClient Android silently
         // denies navigator.geolocation, so the page could never obtain a fix inside the app.
         view.webChromeClient = object : android.webkit.WebChromeClient() {
@@ -104,6 +124,35 @@ class MainActivity : Activity() {
                     pendingGeoCallback = callback
                     pendingGeoOrigin = origin
                     requestPermissions(locationRequiredPermissions().toTypedArray(), permissionRequestId)
+                }
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                callback: android.webkit.ValueCallback<Array<android.net.Uri>>?,
+                params: android.webkit.WebChromeClient.FileChooserParams?,
+            ): Boolean {
+                if (callback == null) return false
+                // Only one chooser may be in flight; a stale callback would leak and freeze the
+                // input, so the previous one is cancelled before the new one is opened.
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = callback
+                val intent = try {
+                    params?.createIntent()
+                } catch (_: Exception) {
+                    null
+                } ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }
+                return try {
+                    startActivityForResult(Intent.createChooser(intent, "Select file"), fileChooserRequestId)
+                    true
+                } catch (_: Exception) {
+                    // No file picker on the device: fail the chooser rather than leaving it hanging.
+                    filePathCallback = null
+                    callback.onReceiveValue(null)
+                    false
                 }
             }
         }
@@ -133,6 +182,22 @@ class MainActivity : Activity() {
         super.onResume()
         // A user who was sent to Settings may have enabled the radio there.
         startRelayServiceIfPermitted()
+    }
+
+    @Deprecated("Deprecated in Java")
+    public override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != fileChooserRequestId) return
+        // Hand the picked file(s) back to the WebView, or an empty result when the chooser was
+        // dismissed — the callback must be answered exactly once or the file input stays stuck.
+        val callback = filePathCallback ?: return
+        filePathCallback = null
+        val uris = if (resultCode == Activity.RESULT_OK) {
+            android.webkit.WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+        } else {
+            null
+        }
+        callback.onReceiveValue(uris)
     }
 
     /** True when the Bluetooth half of the relay can run. */
@@ -281,6 +346,42 @@ class MainActivity : Activity() {
 
     internal fun bluetoothEnabled(): Boolean = bluetoothManager.adapter?.isEnabled == true
 
+    /**
+     * Save a text file (the relay packet export) into the device's Downloads so the citizen can
+     * transfer it by hand. Inside the app's WebView there is no share sheet or download manager for
+     * a blob/data URL, so "Save alert file to transfer" would otherwise do nothing — the file has to
+     * be written natively. Returns a small JSON result the PWA shows in its status line.
+     */
+    internal fun saveTextToDownloads(fileName: String, contents: String): String {
+        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "reach-alert.json" }
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                val out = uri?.let { contentResolver.openOutputStream(it) }
+                if (out == null) {
+                    JSONObject().put("saved", false).toString()
+                } else {
+                    out.use { it.write(contents.toByteArray(Charsets.UTF_8)) }
+                    JSONObject().put("saved", true).put("location", "Downloads/$safeName").toString()
+                }
+            } else {
+                // API 26-28 have no scoped Downloads collection; the app's own external directory
+                // needs no storage permission and is still reachable by a file manager.
+                val dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+                val file = java.io.File(dir, safeName)
+                file.writeText(contents, Charsets.UTF_8)
+                JSONObject().put("saved", true).put("location", file.absolutePath).toString()
+            }
+        } catch (_: Exception) {
+            JSONObject().put("saved", false).toString()
+        }
+    }
+
     @Suppress("DEPRECATION")
     internal fun wifiEnabled(): Boolean =
         (getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager)?.isWifiEnabled == true
@@ -349,6 +450,18 @@ class MainActivity : Activity() {
                 .put("advertise_error", JSONObject.NULL)
                 .put("detail", "Relay node unavailable")
                 .toString()
+        }
+
+        /**
+         * Save the exported relay packet JSON into the device's Downloads. The WebView cannot
+         * complete a blob download or a share sheet, so this is the only way "Save alert file to
+         * transfer" produces a file the citizen can hand to another device.
+         */
+        @JavascriptInterface
+        fun saveExportFile(fileName: String, contents: String): String {
+            if (!originOk()) return "{\"saved\":false}"
+            val main = activity as? MainActivity ?: return "{\"saved\":false}"
+            return main.saveTextToDownloads(fileName, contents)
         }
 
         /** Request runtime permissions and prompt to enable the radios. Returns a status object. */

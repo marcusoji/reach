@@ -11,7 +11,7 @@
     "validate:migrations": "node scripts/tests/migrations.mjs",
     "validate:hardening": "node scripts/tests/final-hardening.mjs",
     "test:security": "node scripts/tests/security-static.mjs",
-    "validate:all": "npm run validate && npm run validate:hardening && npm run test:security && npm run test:ai && npm run test:relay && npm run test:pwa-relay && npm run test:pwa-relay-permissions && npm run test:pwa-relay-status && npm run test:pwa-relay-probe && npm run test:pwa-relay-direct && npm run test:pwa-history && npm run test:pwa-location && npm run test:pwa-api-resilience && npm run test:pwa-evidence && npm run test:pwa-estate-join && npm run test:pwa-relay-export && npm run test:rpc-contract && npm run test:bmoni-phone && npm run test:bmoni-uid && npm run test:bmoni-demo && npm run test:providers && npm run test:relay-sim",
+    "validate:all": "npm run validate && npm run validate:hardening && npm run test:security && npm run test:ai && npm run test:relay && npm run test:pwa-relay && npm run test:pwa-relay-permissions && npm run test:pwa-relay-status && npm run test:pwa-relay-probe && npm run test:pwa-relay-direct && npm run test:pwa-history && npm run test:pwa-location && npm run test:pwa-api-resilience && npm run test:pwa-evidence && npm run test:pwa-estate-join && npm run test:pwa-relay-export && npm run test:pwa-relay-save && npm run test:rpc-contract && npm run test:bmoni-phone && npm run test:bmoni-uid && npm run test:bmoni-demo && npm run test:providers && npm run test:relay-sim",
     "test:ai": "node scripts/tests/ai-engine.mjs",
     "test:relay": "node scripts/tests/relay-verify.mjs",
     "test:pwa-relay": "node scripts/tests/pwa-relay-queue.mjs",
@@ -30,7 +30,8 @@
     "test:bmoni-demo": "node scripts/tests/bmoni-demo.mjs",
     "test:providers": "node scripts/tests/live-provider.mjs",
     "test:pwa-estate-join": "node scripts/tests/pwa-estate-join.mjs",
-    "test:pwa-relay-export": "node scripts/tests/pwa-relay-export.mjs"
+    "test:pwa-relay-export": "node scripts/tests/pwa-relay-export.mjs",
+    "test:pwa-relay-save": "node scripts/tests/pwa-relay-save.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

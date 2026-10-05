@@ -6,7 +6,7 @@ import { Modal } from '../../components/common/Modal';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { getInstitutionBmoniBilling, prepareBmoniInstitutionPayment, submitBmoniInstitutionPaymentSignature, createInstitutionBmoniUser, createBmoniOwnerProofChallenge, createBmoniWallet, startBmoniNigeria, getBmoniDepositAccount, getBmoniOnboardingStatus } from '../../lib/reachApi';
-import { BMONI_DEMO_PERSONA, bmoniDemoPayer } from '../../lib/bmoniDemo';
+import { BMONI_DEMO_PERSONA, bmoniDemoPayer, bmoniDemoPlan, payerIsEmpty, type BmoniDemoStep } from '../../lib/bmoniDemo';
 import { CreditCard, ShieldCheck, WalletCards, RefreshCw, ArrowRight, CheckCircle2, PlayCircle } from 'lucide-react';
 
 const money = (value: unknown) => {
@@ -34,6 +34,7 @@ export const BillingPlanPage: React.FC = () => {
   const [paymentStatus, setPaymentStatus] = useState<any>(null);
   const [demoPlan, setDemoPlan] = useState<any[]>([]);
   const [demoRunning, setDemoRunning] = useState(false);
+  const [demoError, setDemoError] = useState<string | null>(null);
 
   const currentInstitution = institutions[0];
   const refresh = async () => {
@@ -49,6 +50,7 @@ export const BillingPlanPage: React.FC = () => {
     const fresh = bmoniDemoPayer('reach.dev');
     setPayer({ first_name: fresh.first_name, last_name: fresh.last_name, email: fresh.email, phone_number: fresh.phone_number });
     setBvn(BMONI_DEMO_PERSONA.bvn);
+    setDemoError(null);
     showToast('Sandbox persona loaded: Bunch Dillon + a fresh phone number');
   };
 
@@ -73,42 +75,48 @@ export const BillingPlanPage: React.FC = () => {
    */
   const runSandboxDemo = async () => {
     setDemoRunning(true);
-    const steps: any[] = [];
-    const add = (key: string, label: string, status: string, detail: string) => {
-      steps.push({ key, label, status, detail });
-      setDemoPlan([...steps]);
+    // The plan is the same tested definition the helper exposes, so a run and the test cannot drift.
+    // Each entry is flipped to `live`, `skipped` or `simulated` as the run progresses; a failed call
+    // is surfaced separately (see demoError) rather than appended as an ad-hoc step.
+    const plan: BmoniDemoStep[] = bmoniDemoPlan();
+    const add = (key: string, status: BmoniDemoStep['status'], detail?: string) => {
+      setDemoPlan(plan.map((step) => step.key === key ? { ...step, status, detail: detail ?? step.detail } : step));
     };
     const hasPayer = Boolean(account?.bmoni_user_id);
     const hasWallet = Boolean(account?.smart_wallet_id);
     const onboarded = account?.onboarding_status === 'active' || Boolean(account?.ngn_virtual_account_ready);
     const pendingPayment = (billing?.payments || []).find((p: any) => p.status === 'pending');
+    setDemoPlan(plan);
+    setDemoError(null);
     try {
       // 1. Payer — real sandbox call, or reuse the payer already linked to this institution.
       if (hasPayer) {
-        add('payer', 'Create BMONI payer', 'skipped', `Reusing sandbox payer ${account.bmoni_user_id}.`);
+        add('payer', 'skipped', `Reusing sandbox payer ${account.bmoni_user_id}.`);
       } else {
         const fresh = bmoniDemoPayer('reach.dev');
         setPayer({ first_name: fresh.first_name, last_name: fresh.last_name, email: fresh.email, phone_number: fresh.phone_number });
         const result = await createInstitutionBmoniUser(fresh);
-        add('payer', 'Create BMONI payer', 'live', `Sandbox user ${result?.data?.bmoni_user_id ?? 'created'} (persona Bunch Dillon).`);
+        add('payer', 'live', `Sandbox user ${result?.data?.bmoni_user_id ?? 'created'} (persona Bunch Dillon).`);
       }
-      // 2. Owner-proof challenge — real sandbox call when the wallet does not exist yet.
+      // 2. Owner-proof challenge — real sandbox call when the wallet does not exist yet. The
+      // challenge must be bound to the wallet address the owner will sign with; the all-zero
+      // placeholder keeps the sandbox call real while the true address comes from the device.
       if (!hasWallet) {
         const result = await createBmoniOwnerProofChallenge(`0x${'0'.repeat(40)}`);
-        add('challenge', 'Owner-proof challenge', 'live', `Challenge ${result?.data?.challengeId ?? 'issued'} returned by the sandbox.`);
+        add('challenge', 'live', `Challenge ${result?.data?.challengeId ?? 'issued'} returned by the sandbox.`);
       } else {
-        add('challenge', 'Owner-proof challenge', 'skipped', 'Wallet already provisioned for this institution.');
+        add('challenge', 'skipped', 'Wallet already provisioned for this institution.');
       }
       // 3. Owner-proof signature + wallet creation — requires the owner key (BMONI device).
-      add('wallet', 'Sign owner proof + create wallet', hasWallet ? 'skipped' : 'simulated', hasWallet
+      add('wallet', hasWallet ? 'skipped' : 'simulated', hasWallet
         ? 'Smart wallet already exists; the sandbox wallet is real.'
         : 'Needs the wallet owner key on the institution BMONI device; simulated for the MVP.');
       // 4. Nigeria onboarding — real sandbox call when a wallet exists and onboarding has not run.
       if (hasWallet && !onboarded) {
         await startBmoniNigeria(BMONI_DEMO_PERSONA.bvn);
-        add('onboarding', 'Nigeria onboarding (BVN)', 'live', `start-nigeria called with BVN ${BMONI_DEMO_PERSONA.bvn}.`);
+        add('onboarding', 'live', `start-nigeria called with BVN ${BMONI_DEMO_PERSONA.bvn}.`);
       } else {
-        add('onboarding', 'Nigeria onboarding (BVN)', hasWallet ? 'skipped' : 'simulated', hasWallet
+        add('onboarding', hasWallet ? 'skipped' : 'simulated', hasWallet
           ? 'Already active for this institution.'
           : 'Runs after the wallet exists; simulated for the MVP.');
       }
@@ -117,26 +125,28 @@ export const BillingPlanPage: React.FC = () => {
         const status = await getBmoniOnboardingStatus();
         const deposit = await getBmoniDepositAccount();
         const accountNumber = deposit?.data?.accounts?.find((a: any) => a.currency === 'NGN')?.accountNumber;
-        add('deposit', 'NGN virtual account', 'live', `anchorStatus: ${status?.data?.anchorStatus ?? 'unknown'}${accountNumber ? `; NGN account ${accountNumber}` : ''}.`);
+        add('deposit', 'live', `anchorStatus: ${status?.data?.anchorStatus ?? 'unknown'}${accountNumber ? `; NGN account ${accountNumber}` : ''}.`);
       } else {
-        add('deposit', 'NGN virtual account', 'simulated', 'Runs after onboarding; simulated for the MVP.');
+        add('deposit', 'simulated', 'Runs after onboarding; simulated for the MVP.');
       }
       // 6. Subscription proposal — real sandbox call, unless one is already pending.
       if (pendingPayment) {
-        add('proposal', 'Subscription proposal', 'skipped', `A proposal is already pending (${pendingPayment.provider_reference ?? pendingPayment.id}); not creating a second one.`);
+        add('proposal', 'skipped', `A proposal is already pending (${pendingPayment.provider_reference ?? pendingPayment.id}); not creating a second one.`);
       } else if (hasWallet) {
         const result = await prepareBmoniInstitutionPayment();
         setPaymentSession(result.data);
-        add('proposal', 'Subscription proposal', 'live', `Proposal ${result?.data?.proposal_id ?? 'created'} approved; sign payload ready.`);
+        add('proposal', 'live', `Proposal ${result?.data?.proposal_id ?? 'created'} approved; sign payload ready.`);
       } else {
-        add('proposal', 'Subscription proposal', 'simulated', 'Runs after the wallet exists; simulated for the MVP.');
+        add('proposal', 'simulated', 'Runs after the wallet exists; simulated for the MVP.');
       }
       // 7. Signature + settlement — requires the owner key and a funded wallet + REACH webhook.
-      add('sign', 'Sign + settle subscription', 'simulated', 'Needs the owner key and a funded sandbox wallet with the webhook pointed at REACH; simulated for the MVP.');
+      add('sign', 'simulated', 'Needs the owner key and a funded sandbox wallet with the webhook pointed at REACH; simulated for the MVP.');
       showToast('Sandbox demo finished — live steps hit the real sandbox; simulated steps are labelled.');
       await refresh();
     } catch (error) {
-      add('error', 'Demo stopped', 'simulated', errorText(error));
+      // Keep the partial progress already in `plan`; surface the failure separately so the step
+      // list stays the tested seven-step definition rather than growing an ad-hoc error row.
+      setDemoError(errorText(error));
       showToast(errorText(error));
     } finally {
       setDemoRunning(false);
@@ -172,7 +182,7 @@ export const BillingPlanPage: React.FC = () => {
             <Button variant="primary" onClick={() => setPayModalOpen(true)} disabled={loading || !billing?.configured || !account?.smart_wallet_id}>
               <CreditCard size={16}/> Pay institution subscription
             </Button>
-            <Button variant="ghost" onClick={() => { if (!payer.email && !payer.phone_number) prefillSandboxPersona(); setSetupModalOpen(true); }}><WalletCards size={16}/> Configure BMONI</Button>
+            <Button variant="ghost" onClick={() => { if (payerIsEmpty(payer)) prefillSandboxPersona(); setSetupModalOpen(true); }}><WalletCards size={16}/> Configure BMONI</Button>
             <Button variant="ghost" onClick={() => void refresh()} disabled={loading}><RefreshCw size={16}/> Refresh</Button>
           </div>
           {!billing?.configured && <p style={{color:'var(--status-warning-text)',lineHeight:1.5}}>BMONI is not configured on the server yet. Add the BMONI server secret before enabling live institutional payments.</p>}
@@ -210,6 +220,7 @@ export const BillingPlanPage: React.FC = () => {
               <span style={{lineHeight:1.45}}><strong>{step.label}</strong><br/><span style={{color:'var(--reach-text-secondary)',fontSize:'13px'}}>{step.detail}</span></span>
             </div>)}
           </div>}
+          {demoError && <p style={{color:'var(--status-danger-text, var(--status-warning-text))',lineHeight:1.5,fontSize:'13px'}}>Demo stopped: {demoError}</p>}
           <input className="reach-input" placeholder="Authorized payer first name" value={payer.first_name} onChange={e=>setPayer({...payer,first_name:e.target.value})}/>
           <input className="reach-input" placeholder="Authorized payer last name" value={payer.last_name} onChange={e=>setPayer({...payer,last_name:e.target.value})}/>
           <input className="reach-input" placeholder="Authorized payer email" value={payer.email} onChange={e=>setPayer({...payer,email:e.target.value})}/>

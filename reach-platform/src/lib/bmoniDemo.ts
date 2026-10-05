@@ -60,7 +60,7 @@ export function bmoniDemoPlan(skipSteps: string[] = []): BmoniDemoStep[] {
   const skip = new Set(skipSteps);
   const plan: BmoniDemoStep[] = [
     { key: 'payer', label: 'Create BMONI payer', status: 'live', detail: 'POST /v1/users on the sandbox with the documented persona and a fresh phone.' },
-    { key: 'challenge', label: 'Owner-proof challenge', status: 'live', detail: 'POST .../owner-proof-challenges on the sandbox.' },
+    { key: 'challenge', label: 'Owner-proof challenge', status: 'live', detail: 'POST .../owner-proof-challenges on the sandbox, bound to the wallet address.' },
     { key: 'wallet', label: 'Sign owner proof + create wallet', status: 'simulated', detail: 'Requires the wallet owner key (BMONI device). Simulated for the MVP; the sandbox call is live once a signature is supplied.' },
     { key: 'onboarding', label: 'Nigeria onboarding (BVN)', status: 'live', detail: 'POST .../onboarding/start-nigeria on the sandbox.' },
     { key: 'deposit', label: 'NGN virtual account', status: 'live', detail: 'GET .../bank-accounts/deposit-accounts/NGN on the sandbox.' },
@@ -73,4 +73,15 @@ export function bmoniDemoPlan(skipSteps: string[] = []): BmoniDemoStep[] {
 /** True when a plan contains at least one step that hits the real sandbox. */
 export function bmoniDemoHasLiveSteps(plan: BmoniDemoStep[]): boolean {
   return plan.some((step) => step.status === 'live');
+}
+
+/**
+ * True when the payer form still holds only the values it was initialised with — i.e. nothing the
+ * operator typed. The email is seeded from the signed-in admin's address, so an "is the form empty"
+ * check must ignore the email and look only at the fields a human fills in. Otherwise the auto
+ * prefill silently never fires for a real institution admin (their email is already present) and the
+ * Configure modal opens with no sandbox details loaded.
+ */
+export function payerIsEmpty(payer: { first_name?: string; last_name?: string; phone_number?: string }): boolean {
+  return !payer?.first_name?.trim() && !payer?.last_name?.trim() && !payer?.phone_number?.trim();
 }

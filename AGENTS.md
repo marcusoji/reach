@@ -540,6 +540,19 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   relay radio" message points at this path. Pinned by `scripts/tests/pwa-relay-export.mjs`
   (CI: `test:pwa-relay-export`).
 
+- **Inside the relay-node app the WebView must save/open the file itself.** A `WebView` cannot
+  complete a blob download or a share sheet, and it has no file picker without an
+  `onShowFileChooser` — so "Save alert file to transfer" and "Receive an alert file" (and the
+  evidence-capture inputs) did nothing inside the app. `MainActivity` now answers
+  `onShowFileChooser` / `onActivityResult` (a dismissed picker returns an empty result so the input
+  is never stuck), and exposes a `saveExportFile(fileName, contents)` bridge that writes the JSON
+  into the device's Downloads (MediaStore on API 29+, the app's external Downloads directory below
+  that) and returns `{saved, location}`. `handleRelayExport` in `reach-citizen-pwa/js/app.js` uses
+  the bridge when present, otherwise the share sheet / blob download as before. A `DownloadListener`
+  handles a `data:`/`http(s)` download the page might trigger. Pinned by
+  `scripts/tests/pwa-relay-save.mjs` (CI: `test:pwa-relay-save`) and two Robolectric tests in
+  `MainActivityLaunchTest`.
+
 - **The BMONI Configure modal has a one-click sandbox demo.** `Run sandbox demo` drives the
   real sandbox for payer / owner-proof challenge / onboarding / deposit account / proposal and
   marks the two signature steps (`Sign owner proof + create wallet`, `Sign + settle

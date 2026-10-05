@@ -48,4 +48,25 @@ class MainActivityLaunchTest {
         bridge.sendPacket("{}")
         controller.destroy()
     }
+
+    @Test
+    fun `a dismissed file chooser result does not throw`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        // The relay "Receive an alert file" input routes through the WebView file chooser; a
+        // cancelled picker must be answered harmlessly rather than leaving the input stuck.
+        activity.onActivityResult(9003, android.app.Activity.RESULT_CANCELED, null)
+        controller.destroy()
+    }
+
+    @Test
+    fun `saving the relay export returns a parseable result`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        // "Save alert file to transfer" writes natively inside the WebView; the PWA parses the
+        // returned JSON, so it must always be well formed.
+        val result = org.json.JSONObject(activity.saveTextToDownloads("reach-alert-2026-01-01.json", "{\"packets\":[]}"))
+        org.junit.Assert.assertTrue(result.has("saved"))
+        controller.destroy()
+    }
 }

@@ -19,7 +19,7 @@ const js = ts.transpileModule(readFileSync(SRC, 'utf8'), {
 }).outputText;
 const out = path.join(outDir, 'bmoniDemo.mjs');
 writeFileSync(out, js);
-const { BMONI_DEMO_PERSONA, bmoniDemoPhone, bmoniDemoPayer, bmoniDemoPlan, bmoniDemoHasLiveSteps } = await import(pathToFileURL(out).href);
+const { BMONI_DEMO_PERSONA, bmoniDemoPhone, bmoniDemoPayer, bmoniDemoPlan, bmoniDemoHasLiveSteps, payerIsEmpty } = await import(pathToFileURL(out).href);
 
 let pass = 0, fail = 0;
 const ck = (name, cond, detail = '') => {
@@ -53,6 +53,14 @@ ck('the plan has live steps', bmoniDemoHasLiveSteps(plan) === true);
 const skipped = bmoniDemoPlan(['payer', 'challenge']);
 ck('already-done steps are marked skipped, not re-run', skipped.find((s) => s.key === 'payer')?.status === 'skipped' && skipped.find((s) => s.key === 'challenge')?.status === 'skipped');
 ck('a fully-skipped plan has no live steps', bmoniDemoHasLiveSteps(bmoniDemoPlan(plan.map((s) => s.key))) === false);
+
+// The Configure modal auto-prefills only when the payer form is empty. The email is seeded from the
+// signed-in admin, so the emptiness check must ignore it — otherwise a real institution admin's own
+// email makes the form look "filled" and the prefill never runs.
+ck('a form holding only the seeded admin email counts as empty', payerIsEmpty({ first_name: '', last_name: '', email: 'admin@greenfield.reach.dev', phone_number: '' }) === true);
+ck('a form with a typed first name is not empty', payerIsEmpty({ first_name: 'Bunch', last_name: '', email: 'x@y.z', phone_number: '' }) === false);
+ck('a form with a typed phone is not empty', payerIsEmpty({ first_name: '', last_name: '', email: '', phone_number: '+2348012345678' }) === false);
+ck('a loaded sandbox persona is not empty', payerIsEmpty(bmoniDemoPayer('reach.dev', 1_700_000_000_000, () => 0.5)) === false);
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 assert.equal(fail, 0, `${fail} BMONI demo assertion(s) failed`);
