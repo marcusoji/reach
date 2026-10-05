@@ -6,9 +6,18 @@ interface MediaChipsProps {
     image: boolean;
     location: boolean;
   };
+  /** The incident's recorded location label, if any. Shown verbatim — never invented. */
+  locationLabel?: string | null;
 }
 
-export const MediaChips: React.FC<MediaChipsProps> = ({ evidence }) => {
+/**
+ * Evidence chips for the active incident. The chips only report what the incident record actually
+ * carries: a chip is available when the corresponding evidence is attached, and opening it explains
+ * how to review that evidence. The panel deliberately does not describe footage, telemetry or a
+ * geofence that the desk has not been shown — an operator acting on a fabricated CCTV summary would
+ * be worse than no summary at all.
+ */
+export const MediaChips: React.FC<MediaChipsProps> = ({ evidence, locationLabel }) => {
   const [activeMedia, setActiveMedia] = useState<string | null>(null);
 
   const chips = [
@@ -47,13 +56,25 @@ export const MediaChips: React.FC<MediaChipsProps> = ({ evidence }) => {
           }}
         >
           {activeMedia === 'audio' && (
-            <p><strong>Audio Telemetry:</strong> 911 Call Audio Stream #8841-A (Decoded 16kHz, ambient scream & siren detected).</p>
+            <p>
+              {evidence.audio
+                ? 'An audio clip is attached to this incident. Open the incident record to review it.'
+                : 'No audio clip is attached to this incident.'}
+            </p>
           )}
           {activeMedia === 'image' && (
-            <p><strong>Captured Image:</strong> CCTV Feed Cam-04 Lobby West (AI confidence bbox 0.89 person on floor).</p>
+            <p>
+              {evidence.image
+                ? 'An image is attached to this incident. Open the incident record to review it.'
+                : 'No image is attached to this incident.'}
+            </p>
           )}
           {activeMedia === 'location' && (
-            <p><strong>Geofence:</strong> Lat 6.5244, Lng 3.3792 · Greenfield Estate Block 24 Ground Level.</p>
+            <p>
+              {locationLabel
+                ? <>Recorded location: <strong>{locationLabel}</strong>.</>
+                : 'No location is recorded for this incident.'}
+            </p>
           )}
         </div>
       )}

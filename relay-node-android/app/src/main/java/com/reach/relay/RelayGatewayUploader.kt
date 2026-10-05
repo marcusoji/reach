@@ -35,6 +35,67 @@ object RelayGatewayUploader {
             .apply()
     }
 
+    /**
+     * Register this node's relay identity with the gateway.
+     *
+     * A forwarded packet carries a relay envelope signed with this node's key, and
+     * `ingest_relay_packet_service` rejects any relay whose `relay_device_id`/`relay_public_key`
+     * is not an active `device_registrations` row ("Unregistered or revoked relay device"). The
+     * PWA registers its own source identity on sign-in, but the native node never registered its
+     * relay identity, so every packet it forwarded was refused — the relay could receive packets
+     * and never deliver one. Registration is idempotent (`on conflict(device_id) do update`), so
+     * re-registering on each session configure/refresh is safe.
+     *
+     * Blocking; call from a background thread via [registerDeviceAsync].
+     */
+    fun registerDevice(context: Context): Boolean {
+        val (base, token, anon) = config(context) ?: return false
+        if (!connectivityProbe(context)) return false
+        val body = try {
+            JSONObject()
+                .put("device_id", DeviceIdentity.deviceId())
+                .put("public_key", DeviceIdentity.publicKeyB64())
+                .put("platform", "android")
+                .put(
+                    "metadata",
+                    JSONObject()
+                        .put("transport", "native-relay")
+                        .put("protocol_version", RelayProtocol.PROTOCOL_VERSION)
+                )
+                .toString()
+        } catch (e: Exception) {
+            Log.w(TAG, "device registration body build failed: ${e.message}")
+            return false
+        }
+        return try {
+            val conn = (URL("$base/devices/register").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = TIMEOUT_MS
+                readTimeout = TIMEOUT_MS
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Authorization", "Bearer $token")
+                if (anon.isNotBlank()) setRequestProperty("apikey", anon)
+            }
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            try { (if (code in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytes() } } catch (_: Exception) {}
+            conn.disconnect()
+            code in 200..299
+        } catch (e: Exception) {
+            Log.w(TAG, "device registration failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Register the node's relay identity off the main thread; never blocks a bridge call. */
+    fun registerDeviceAsync(context: Context) {
+        val app = context.applicationContext
+        Thread {
+            if (registerDevice(app)) registered = true
+        }.apply { isDaemon = true; name = "reach-register-device"; start() }
+    }
+
     fun isConfigured(context: Context): Boolean = config(context) != null
 
     private fun config(context: Context): Triple<String, String, String>? {
@@ -90,7 +151,7 @@ object RelayGatewayUploader {
             Log.w(TAG, "gateway body build failed: ${e.message}")
             return false
         }
-        return try {
+        val delivered = try {
             val conn = (URL("$base/relay/packets").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = TIMEOUT_MS
@@ -109,7 +170,16 @@ object RelayGatewayUploader {
             Log.w(TAG, "gateway upload failed: ${e.message}")
             false
         }
+        // A relayed packet is only accepted from a registered relay identity. If the node's session
+        // was restored from prefs without a fresh bridge handoff, the first uplink is refused as
+        // "Unregistered or revoked relay device"; register once, then let the next drain retry the
+        // upload with a registered identity. The happy path pays no extra round trip.
+        if (!delivered && !registered && registerDevice(context)) registered = true
+        return delivered
     }
+
+    /** Register at most once per process; guards the fallback registration on the upload path. */
+    @Volatile private var registered = false
 
     /** Map the stored radio packet to the /relay/packets request body.
      *

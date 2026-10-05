@@ -38,13 +38,19 @@ class RelayGatewayUploaderTest {
         .put("minimal_payload", JSONObject().put("category", "fire"))
 
     /** One-shot HTTP responder: captures the request, replies with [status]. */
-    private fun withServer(status: Int, capture: (auth: String, body: String) -> Unit, block: (base: String) -> Unit) {
+    private fun withServer(
+        status: Int,
+        capture: (auth: String, body: String) -> Unit,
+        pathCapture: (path: String) -> Unit = {},
+        block: (base: String) -> Unit,
+    ) {
         val server = ServerSocket(0)
         val thread = Thread {
             try {
                 val sock = server.accept()
                 val reader = sock.getInputStream().bufferedReader()
-                reader.readLine() // request line
+                val requestLine = reader.readLine() // request line
+                pathCapture(requestLine?.split(" ")?.getOrNull(1) ?: "")
                 var contentLength = 0
                 var auth = ""
                 var line = reader.readLine()
@@ -161,5 +167,31 @@ class RelayGatewayUploaderTest {
             RelayGatewayUploader.configure(context, base, "t", "a")
             assertFalse(RelayGatewayUploader.upload(context, directPacket()))
         }
+    }
+
+    @Test
+    fun `registerDevice posts this node's relay identity and returns true on 200`() {
+        RelayGatewayUploader.connectivityProbe = { true }
+        var auth = ""
+        var body = ""
+        var path = ""
+        withServer(200, { a, b -> auth = a; body = b }, pathCapture = { p -> path = p }) { base ->
+            RelayGatewayUploader.configure(context, base, "session-token", "anon-key")
+            assertTrue(RelayGatewayUploader.registerDevice(context))
+        }
+        // The relay identity the gateway must know is the node's own device id/public key, and it is
+        // the endpoint that `ingest_relay_packet_service` reads to authorize a relay envelope.
+        // Parse rather than substring-match: org.json escapes "/" as "\/" in the wire body.
+        val sent = JSONObject(body)
+        assertEquals("/devices/register", path)
+        assertEquals("Bearer session-token", auth)
+        assertEquals(DeviceIdentity.deviceId(), sent.optString("device_id"))
+        assertEquals(DeviceIdentity.publicKeyB64(), sent.optString("public_key"))
+        assertEquals("android", sent.optString("platform"))
+    }
+
+    @Test
+    fun `registerDevice is skipped when no session was handed over`() {
+        assertFalse(RelayGatewayUploader.registerDevice(context))
     }
 }

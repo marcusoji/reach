@@ -468,7 +468,12 @@ export async function getRelayCapabilities(){ return detectRelayCapabilities(); 
 export async function pairDirectRelay(){ return connectDirectRelay(); }
 /** Send a harmless probe to a nearby relay node and report whether it carried the packet. */
 export async function testDirectRelay(){ return probeDirectRelay(); }
-export function initBackendSync(){const flush=()=>{void flushQueue();void flushRelayQueue();void flushEvidenceQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
+export function initBackendSync(){
+  // A returning launch restores the session from localStorage, so signup/login never runs and the
+  // native relay node would never be handed the gateway session — leaving it with no uplink config
+  // (and, before, no registered relay identity). Hand the restored session over once on startup.
+  try { const restored=getSession(); if(restored?.access_token) syncNativeBridgeSession(restored); } catch {}
+  const flush=()=>{void flushQueue();void flushRelayQueue();void flushEvidenceQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
 
 /** Attach captures that already have an incident (or a queued report) to attach to. A row whose
  * emergency report has not been accepted yet is left for rebindQueuedEvidence to repoint. */

@@ -143,6 +143,35 @@ console.log('\n=== D. Cross-institution packet-key reuse (multi-tenant isolation
   ck('institution B creates no incident from a foreign packet key', after === before, `incidents before=${before} after=${after}`);
 }
 
+console.log('\n=== E. Relay node identity must be registered before its envelope is accepted ===');
+{
+  // The native relay node signs every forwarded packet with its own identity as the relay hop.
+  // ingest_relay_packet_service() rejects a relay whose (relay_device_id, relay_public_key) is not
+  // an active device_registrations row. This pins the exact contract the Android node's
+  // /devices/register call satisfies: without it every forwarded packet is refused while the
+  // radios and ACKs look healthy.
+  const userRelay = randomUUID();
+  const pkRelay = 'pk-' + 'R'.repeat(60);
+  q(`insert into auth.users(id,email) values ('${userRelay}','r@x');`);
+  q(`insert into public.profiles(id,role,institution_id) values ('${userRelay}','citizen','${inst}');`);
+  const relayed = { ...packet, relay_device_id: 'device-relay-0001', relay_public_key: pkRelay };
+  const relayedJson = JSON.stringify(relayed).replace(/'/g, "''");
+
+  const before = psql(['-d', dbName, '-tAc', `select public.ingest_relay_packet_service('${relayedJson}'::jsonb,'${userActor}'::uuid)`]);
+  ck('an unregistered relay identity is refused',
+    /Unregistered or revoked relay device/i.test(before.stderr),
+    before.stderr.split('\n').find((l) => /ERROR/i.test(l)) || '');
+
+  const reg = psql(['-d', dbName, '-tAc',
+    `do $$ begin perform set_config('request.jwt.claim.sub','${userRelay}',false); perform public.register_my_relay_device('device-relay-0001','${pkRelay}','android','{}'::jsonb); end $$;`]);
+  ck('register_my_relay_device records the node as active', reg.status === 0 && q(`select status from public.device_registrations where device_id='device-relay-0001'`) === 'active',
+    reg.stderr.split('\n').find((l) => /ERROR/i.test(l)) || '');
+
+  const after = psql(['-d', dbName, '-tAc', `select public.ingest_relay_packet_service('${relayedJson}'::jsonb,'${userActor}'::uuid)`]);
+  ck('the same relay envelope is accepted once registered', after.status === 0,
+    after.stderr.split('\n').find((l) => /ERROR/i.test(l)) || '');
+}
+
 console.log('\n' + '='.repeat(64));
 console.log(`TOTAL: ${pass}/${pass + fail} passed`);
 console.log('='.repeat(64));

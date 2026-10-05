@@ -299,6 +299,16 @@ S('I. Production wiring guards');
   ck('index.ts still calls the trusted service RPC', indexTs.includes("rpc('ingest_relay_packet_service'"));
   const verifyTs = readFileSync(path.join(API, 'relay_verify.ts'), 'utf8');
   ck('verifier binds the fingerprint to the signed payload', verifyTs.includes('relayFingerprint(sourceSignedPayload)'));
+  // The native relay node signs relay envelopes with its own identity, and the gateway refuses a
+  // relay device that is not registered. If the node stops registering (or stops being handed the
+  // session), every packet it forwards is rejected as "Unregistered or revoked relay device" while
+  // the radios, ACKs and queue all look healthy. Pin both halves of the wiring.
+  const uploaderKt = readFileSync(path.join(HERE, '..', '..', '..', 'relay-node-android', 'app', 'src', 'main', 'java', 'com', 'reach', 'relay', 'RelayGatewayUploader.kt'), 'utf8');
+  const mainKt = readFileSync(path.join(HERE, '..', '..', '..', 'relay-node-android', 'app', 'src', 'main', 'java', 'com', 'reach', 'relay', 'MainActivity.kt'), 'utf8');
+  const backendJs = readFileSync(path.join(HERE, '..', '..', '..', 'reach-citizen-pwa', 'js', 'backend.js'), 'utf8');
+  ck('native node can register its relay identity', /fun registerDevice\(/.test(uploaderKt) && uploaderKt.includes('/devices/register'));
+  ck('bridge session handoff registers the relay identity', /configureSession[\s\S]{0,800}registerDeviceAsync/.test(mainKt));
+  ck('a restored session is handed to the native bridge on startup', /initBackendSync[\s\S]{0,400}syncNativeBridgeSession/.test(backendJs));
 }
 
 // =====================================================================

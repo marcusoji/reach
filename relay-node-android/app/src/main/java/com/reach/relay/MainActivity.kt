@@ -396,6 +396,10 @@ class MainActivity : Activity() {
         fun configureSession(apiUrl: String, accessToken: String, anonKey: String) {
             if (!originOk()) return
             RelayGatewayUploader.configure(activity, apiUrl, accessToken, anonKey)
+            // The node forwards packets under its own relay identity, and the gateway rejects any
+            // relay device that is not registered. The PWA registers its own source identity, so the
+            // node must register its relay identity with the same session it was just handed.
+            RelayGatewayUploader.registerDeviceAsync(activity)
         }
 
         @JavascriptInterface

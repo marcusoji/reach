@@ -478,6 +478,19 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   .buildBody` re-signed a packet with a non-zero hop count using *this* device's key, stamping the
   wrong node as the relay of a hop it did not make. It now uploads an existing relay envelope
   verbatim and only builds one for a hop this node actually performed.
+- **The Android relay node must register its relay identity or every forwarded packet is refused.**
+  `ingest_relay_packet_service` rejects a relay whose `(relay_device_id, relay_public_key)` is not an
+  active `device_registrations` row ("Unregistered or revoked relay device"). The PWA self-registers
+  its *source* identity on sign-in (`backend.js` → `POST /devices/register`), but the native node
+  never registered its *relay* identity, so it could receive a packet over BLE/Wi-Fi and never
+  deliver one — radios, ACKs and queue all looked healthy while the gateway rejected the uplink.
+  `RelayGatewayUploader.registerDevice`/`registerDeviceAsync` now registers on every
+  `configureSession` bridge handoff, and `upload` re-registers once if an uplink fails while
+  unregistered (idempotent upsert; happy path pays no extra round trip). `initBackendSync` also hands
+  the restored session to the bridge on a returning launch, since signup/login never runs then and
+  the node would otherwise keep no uplink config. Pinned by
+  `scripts/tests/relay-ingest-sim.mjs` section E (unregistered refused → register → accepted) and the
+  wiring checks in `relay-verify.mjs` section I.
 - **The PWA requests the relay radios on open (native only) and shows real relay status.**
   `requestRadiosOnOpen()` asks the native node for Bluetooth-then-Wi-Fi permission at launch; a
   plain browser is skipped because Web Bluetooth only opens its chooser from a real user gesture.
@@ -565,3 +578,10 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   idempotent: an existing payer/wallet/onboarding/pending proposal is reused, since a second
   proposal trips the one-active-payment index. `scripts/tests/bmoni-demo.mjs` (CI:
   `test:bmoni-demo`) pins the persona, unique-phone generation and the live/simulated split.
+
+- **The security-desk evidence panel must not describe evidence it was not given.** `MediaChips`
+  hard-coded "911 Call Audio Stream #8841-A", "CCTV Feed Cam-04" and a specific lat/long geofence,
+  so the Response Desk showed a fabricated CCTV/telemetry summary for every incident regardless of
+  what was actually attached — an operator could act on invented evidence. The panel now derives its
+  text from the incident (`evidence.audio/image/location`, `locationLabel`) and says "no audio clip
+  / no image / no location is recorded" when the record is empty.
