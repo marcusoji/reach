@@ -56,13 +56,16 @@ class RelayService : Service() {
         }
         try {
             wifiRelay = WifiDirectRelay(this).also { wr ->
-                wr.startAckServer(this) { packet ->
+                wr.startAckServer(this, { listening -> wifiListening = listening }) { packet ->
                     RelayForwarder.enqueue(this, packet)
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Wi-Fi relay start failed: ${e.message}")
         }
+        // The service itself is up even when the Bluetooth half is refused, so the Wi-Fi path can
+        // still carry packets and the UI must not report the whole node as stopped.
+        isStarted = true
         // Periodic purge + drain
         handler.post(object : Runnable {
             override fun run() {
@@ -228,6 +231,7 @@ class RelayService : Service() {
         try { gattServer?.close() } catch (_: Exception) {}
         running.set(false)
         isRunning = false
+        isStarted = false
         advertisingOk = false
         super.onDestroy()
     }
@@ -239,7 +243,10 @@ class RelayService : Service() {
          * actually happening instead of inferring "listening" from the permission grant alone.
          */
         @Volatile internal var isRunning = false
+        @Volatile internal var isStarted = false
         @Volatile internal var advertisingOk = false
         @Volatile internal var advertiseError: String? = null
+        /** True while the Wi-Fi Direct ACK listener is bound (the Wi-Fi inbound half is live). */
+        @Volatile internal var wifiListening = false
     }
 }

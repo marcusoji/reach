@@ -68,10 +68,11 @@ export function relaySummary(status) {
   if (status.dead > 0) return `${status.dead} packet${status.dead === 1 ? '' : 's'} could not be delivered — reconnect to retry.`;
   if (status.queued > 0) return `${status.queued} packet${status.queued === 1 ? '' : 's'} waiting to be carried.`;
   const radio = status.radio;
-  if (radio && !radio.bluetooth) return 'Turn Bluetooth on to relay.';
+  // Either radio is a valid relay path, so only ask for a radio when neither is on.
+  if (radio && !radio.bluetooth && !radio.wifi) return 'Turn Bluetooth or Wi-Fi on to relay.';
   // Permission granted is not the same as listening: report the real advertising state rather than
   // telling the citizen the node is ready when it cannot be discovered.
-  if (radio && radio.permissions && radio.advertising === false) return 'Bluetooth is on. Relay is getting ready to carry packets.';
+  if (radio && radio.permissions && radio.advertising === false) return 'Relay is getting ready to carry packets.';
   if (status.capability.nativeRelay) return 'Ready to carry emergency packets nearby.';
   if (status.capability.directRelay) return 'Pair with a nearby relay node to hand it your alert.';
   if (status.capability.bluetoothApi) return 'Ready to carry alerts nearby.';

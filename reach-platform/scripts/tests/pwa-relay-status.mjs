@@ -69,6 +69,16 @@ console.log('\n=== PWA relay status ===');
   const status = await relayStatus();
   ck('advertising node reports ready', /^Ready to carry/i.test(relaySummary(status)));
 }
+{
+  // 6. Wi-Fi is a relay path on its own: a node listening only on Wi-Fi (Bluetooth off) must not
+  // be told to switch Bluetooth on, and must not be asked for a radio it is already using.
+  reset();
+  globalThis.window.REACH_NATIVE_RELAY = { getPermissionStatus: () => JSON.stringify({ permissions: true, bluetooth: false, wifi: true, hotspot: false, service_running: true, advertising: true, wifi_listening: true, ble_listening: false }) };
+  globalThis.window.REACH_RELAY_QUEUE = { listRelayQueue: async () => [], listRelayDeadLetter: async () => [] };
+  const status = await relayStatus();
+  ck('Wi-Fi-only node is not asked to switch Bluetooth on', !/Turn Bluetooth/i.test(relaySummary(status)));
+  ck('Wi-Fi-only listening node reports ready', /^Ready to carry/i.test(relaySummary(status)));
+}
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

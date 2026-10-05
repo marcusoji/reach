@@ -31,6 +31,10 @@ class WifiDirectRelay(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var server: ServerSocket? = null
 
+    /** True while the ACK listener is bound, so the node can report the Wi-Fi half honestly. */
+    @Volatile var listening = false
+        private set
+
     fun send(packet: ByteArray, onComplete: (Boolean) -> Unit = {}) {
         sendWithAck(packet, "", "") { ok, _ -> onComplete(ok) }
     }
@@ -130,7 +134,7 @@ class WifiDirectRelay(private val context: Context) {
     }
 
     /** Start group-owner style listener that validates, enqueues, returns ACK. */
-    fun startAckServer(context: Context, onPacket: (org.json.JSONObject) -> Unit) {
+    fun startAckServer(context: Context, onListening: (Boolean) -> Unit = {}, onPacket: (org.json.JSONObject) -> Unit) {
         // Fail closed: without the Wi-Fi Direct permission the radio is unusable, and binding the
         // listener anyway would advertise a relay path that can never complete a transfer.
         if (manager == null || channel == null || !Permissions.wifiDirect(context)) return
@@ -146,6 +150,8 @@ class WifiDirectRelay(private val context: Context) {
         thread(isDaemon = true, name = "reach-wifi-ack") {
             try {
                 server = ServerSocket(8988).also { it.soTimeout = 0 }
+                listening = true
+                try { onListening(true) } catch (_: Exception) {}
                 while (!Thread.currentThread().isInterrupted) {
                     try {
                         server?.accept()?.use { socket ->
@@ -183,6 +189,7 @@ class WifiDirectRelay(private val context: Context) {
     fun close() {
         try { server?.close() } catch (_: Exception) {}
         server = null
+        listening = false
         // Leave the autonomous group so a later node (or this one, restarted) can form its own.
         try { manager?.removeGroup(channel, null) } catch (_: Exception) {}
     }

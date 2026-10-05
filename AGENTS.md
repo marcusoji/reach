@@ -124,10 +124,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `startForeground`/`startRelay`/`WifiDirectRelay.startAckServer` unguarded, and
   `startRelayServiceIfPermitted()` required *every* permission (including Wi-Fi Direct's
   `NEARBY_WIFI_DEVICES`/location) before starting the service. A citizen who declined Wi-Fi got no
-  relay at all, and one transport throwing killed the service. Each transport is now wrapped and the
-  service starts on the Bluetooth grant alone; `MainActivity` catches a broken WebView provider too.
-  `relayStateJson()` reports `permissions` (Bluetooth) and `wifi_permission` separately — do not
-  collapse them back into one gate.
+  relay at all, and one transport throwing killed the service. Each transport is now wrapped, and the
+  service starts on *either* the Bluetooth grant or the Wi-Fi grant — a citizen who allows only
+  nearby Wi-Fi still gets the Wi-Fi relay path. `relayStateJson()` reports `permissions`
+  (Bluetooth-or-Wi-Fi), `wifi_permission`, `ble_listening` and `wifi_listening` separately — do not
+  collapse them back into one gate or infer "listening" from the permission alone.
+- **Wi-Fi Direct is a first-class relay path, not only a fallback.** `relaySummary` used to ask for
+  Bluetooth whenever `bluetooth:false`, even when the node was listening on Wi-Fi; it now asks only
+  when *neither* radio is on. `WifiDirectRelay.listening` / `RelayService.wifiListening` expose the
+  real ACK-listener state so a Wi-Fi-only node can honestly report "ready".
 - **A relay packet imported from a transferred JSON file must reach the radios when offline.**
   `flushRelayQueue` now calls `handPacketToNativeRelay` for each live row when there is no
   internet/connection, so an imported file is carried over Bluetooth/Wi-Fi Direct by the node rather

@@ -262,9 +262,10 @@ class MainActivity : Activity() {
     )
 
     private fun startRelayServiceIfPermitted() {
-        // Start on the Bluetooth grant alone: whichever radio is available must come up, even if
-        // the citizen declines Wi-Fi. The service itself skips any transport it cannot run.
-        if (bleRelayPermissionsGranted()) {
+        // Start on whichever radio is available — the user asked for either to be usable — and let
+        // the service skip any transport it cannot run. Starting only on the Bluetooth grant meant a
+        // citizen who allowed nearby Wi-Fi but declined Bluetooth had no relay path at all.
+        if (bleRelayPermissionsGranted() || hasPermission(wifiRequiredPermission())) {
             startForegroundService(Intent(this, RelayService::class.java))
         }
     }
@@ -276,31 +277,43 @@ class MainActivity : Activity() {
      * peripheral half failed to start, so the UI can say "listening" only when the node actually is.
      */
     internal fun relayStateJson(): String {
-        val granted = bleRelayPermissionsGranted()
+        val bleGranted = bleRelayPermissionsGranted()
         val wifiGranted = hasPermission(wifiRequiredPermission())
         val bt = bluetoothEnabled()
         val wifi = wifiEnabled()
         val hotspot = RelayGatewayUploader.hotspotActive(this)
-        val running = RelayService.isRunning
-        val advertising = running && RelayService.advertisingOk
+        val running = RelayService.isStarted
+        val bleListening = running && RelayService.advertisingOk
+        val wifiListening = running && RelayService.wifiListening
+        val advertising = bleListening || wifiListening
         val advertiseError = RelayService.advertiseError
         val detail = when {
-            !granted -> "Waiting for Bluetooth permission"
-            !bt -> "Permission granted — switch Bluetooth on to relay"
-            !running -> "Bluetooth on — relay is starting up"
-            !advertising -> "Bluetooth on — this node is not advertising${advertiseError?.let { " ($it)" } ?: ""}"
-            !wifiGranted -> "Listening on Bluetooth — allow nearby Wi-Fi devices for the second relay path"
-            !wifi -> "Listening on Bluetooth — turn Wi-Fi or hotspot on for the second relay path"
-            else -> "Relay node ready — Bluetooth and Wi-Fi on"
+            !bleGranted && !wifiGranted -> "Waiting for Bluetooth or nearby Wi-Fi permission"
+            !running -> "Permission granted — relay is starting up"
+            // At least one transport is live: report what is actually listening, and name the other
+            // radio only as a hint, never as if it were carrying packets.
+            bleListening && wifiListening -> "Relay node ready — listening on Bluetooth and Wi-Fi"
+            bleListening && !wifiGranted -> "Listening on Bluetooth — allow nearby Wi-Fi devices for the second relay path"
+            bleListening && !wifi -> "Listening on Bluetooth — turn Wi-Fi or hotspot on for the second relay path"
+            bleListening -> "Listening on Bluetooth — the Wi-Fi relay path is starting"
+            wifiListening -> if (bt) "Listening on Wi-Fi — the Bluetooth relay path is starting"
+                else "Listening on Wi-Fi — switch Bluetooth on for the primary relay path"
+            // Nothing is listening yet: say which grant/radio is missing, most specific first.
+            !bleGranted && !bt -> "Waiting for Bluetooth permission or Wi-Fi relay"
+            !bleGranted -> "Switch Bluetooth on, or allow nearby Wi-Fi devices to relay"
+            !bt -> "Switch Bluetooth on to relay"
+            else -> "This node is not advertising${advertiseError?.let { " ($it)" } ?: ""}"
         }
         return JSONObject()
-            .put("permissions", granted)
+            .put("permissions", bleGranted || wifiGranted)
             .put("bluetooth", bt)
             .put("wifi", wifi)
             .put("wifi_permission", wifiGranted)
             .put("hotspot", hotspot)
             .put("service_running", running)
             .put("advertising", advertising)
+            .put("ble_listening", bleListening)
+            .put("wifi_listening", wifiListening)
             .put("advertise_error", advertiseError ?: JSONObject.NULL)
             .put("detail", detail)
             .toString()
