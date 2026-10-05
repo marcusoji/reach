@@ -82,3 +82,26 @@ documented sandbox number is taken and a duplicate returns `409`.
 Sign in as `admin@northgate.reach.dev` (the seeded trial tenant) and run Configure
 BMONI → Create payer (Bunch Dillon persona, BVN `95888168924`, fresh phone) → wallet →
 KYC → Start Nigeria → Load NGN virtual account → Pay.
+
+**One-click sandbox demo.** The Configure BMONI modal now has **Run sandbox demo** and
+**Load sandbox details**. "Load sandbox details" prefills the documented Bunch Dillon
+persona with a freshly generated E.164 phone (`src/lib/bmoniDemo.ts`), because the sandbox
+rejects a reused number with `409`. "Run sandbox demo" drives the **real** sandbox for the
+steps it can actually perform — create payer, owner-proof challenge, Nigeria onboarding,
+NGN virtual account, subscription proposal — and marks the two steps that cannot be
+automated from the browser as **simulated**:
+
+- **Sign owner proof + create wallet** — the owner-proof signature needs the wallet owner's
+  private key, which by design never leaves the institution's BMONI device
+  (`bmoni-institution-mobile`). The sandbox call is live the moment a signature is supplied.
+- **Sign + settle subscription** — the payment signature needs that same owner key, and
+  settlement additionally needs a funded sandbox wallet with the webhook re-registered to
+  REACH. The sandbox wallet starts at `0` and is credited manually.
+
+So the demo reaches a real, provider-returned proposal with a sign payload, and the panel
+says plainly which steps were live and which were simulated. It never claims a settlement
+the sandbox did not make. The demo is idempotent: an institution that already has a payer,
+wallet, onboarding or a pending proposal reuses it rather than creating a duplicate (a
+second proposal would trip the one-active-payment index). `scripts/tests/bmoni-demo.mjs`
+pins the persona, the unique-phone generation and the live/simulated split (CI:
+`test:bmoni-demo`).

@@ -348,3 +348,19 @@ a post-report "Join your estate" button, a home estate chip, and the join screen
 `validate:all` green including two new DB-free PWA suites — `pwa-estate-join` (8) and
 `pwa-relay-export` (7); platform `build` passes. The join flow does not retroactively attribute
 pre-join incidents, which is stated in the migration header and the UI.
+
+**One-click BMONI sandbox demo.** The Configure BMONI modal gained a **Run sandbox demo**
+button and a **Load sandbox details** prefill, so a demo can drive the real BMONI sandbox
+without hand-typing the persona. `src/lib/bmoniDemo.ts` holds the documented Bunch Dillon
+persona (BVN `95888168924`) and generates a fresh E.164 phone per run — the sandbox rejects a
+reused number with `409`. The runner calls the sandbox for the steps it can perform (payer,
+owner-proof challenge, onboarding, deposit account, proposal) and labels the two steps that
+structurally cannot be automated from a browser as **simulated**: the owner-proof signature
+and the payment signature/settlement both need the wallet owner's private key, which never
+leaves the institution's BMONI device, and settlement also needs a funded wallet plus a
+webhook pointed at REACH. The result panel reports each step as `live`, `skipped` or
+`simulated`, so the demo never claims a settlement the sandbox did not make. It is
+idempotent — an existing payer/wallet/onboarding/pending proposal is reused rather than
+duplicated, because a second proposal trips the one-active-payment index.
+`scripts/tests/bmoni-demo.mjs` (CI: `test:bmoni-demo`) pins the persona, the unique-phone
+generation and the live/simulated split.

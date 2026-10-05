@@ -515,3 +515,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   relay radio" message points at this path. Pinned by `scripts/tests/pwa-relay-export.mjs`
   (CI: `test:pwa-relay-export`).
 
+- **The BMONI Configure modal has a one-click sandbox demo.** `Run sandbox demo` drives the
+  real sandbox for payer / owner-proof challenge / onboarding / deposit account / proposal and
+  marks the two signature steps (`Sign owner proof + create wallet`, `Sign + settle
+  subscription`) as **simulated** — they need the wallet owner's private key, which never
+  leaves the `bmoni-institution-mobile` device, and settlement additionally needs a funded
+  wallet + a webhook pointed at REACH. The result panel labels every step `live`/`skipped`/
+  `simulated`, so it never claims a settlement the sandbox did not make. `src/lib/bmoniDemo.ts`
+  holds the documented Bunch Dillon persona (BVN `95888168924`) and generates a **fresh**
+  E.164 phone per run, because the sandbox rejects a reused number with `409`. The runner is
+  idempotent: an existing payer/wallet/onboarding/pending proposal is reused, since a second
+  proposal trips the one-active-payment index. `scripts/tests/bmoni-demo.mjs` (CI:
+  `test:bmoni-demo`) pins the persona, unique-phone generation and the live/simulated split.
