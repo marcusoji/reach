@@ -134,6 +134,16 @@ function setupEventDelegation() {
   if (relayTestButton) {
     relayTestButton.addEventListener('click', () => { void handleRelayLinkTest(); });
   }
+  const relayExportButton = $('#relayExportButton');
+  if (relayExportButton) {
+    relayExportButton.addEventListener('click', () => { void handleRelayExport(); });
+  }
+  const relayImportButton = $('#relayImportButton');
+  const relayImportInput = $('#relayImportInput');
+  if (relayImportButton && relayImportInput) {
+    relayImportButton.addEventListener('click', () => relayImportInput.click());
+    relayImportInput.addEventListener('change', () => { void handleRelayImport(relayImportInput); });
+  }
 
   // Category selection rows
   const catList = $('#catList');
@@ -185,7 +195,7 @@ if (document.readyState === 'loading') {
 }
 
 // Backend + offline-first enhancements
-import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay, pairDirectRelay } from './backend.js';
+import { signup, login, sendOrQueueEmergency, initBackendSync, updateProfile, getProfile, joinInstitution, exportRelayPackets, importRelayPackets, getIncident, getIncidentHistory, getContacts, addContact, deleteContact, backendConfigured, hasSession, probeNativeRelay, pairDirectRelay } from './backend.js';
 import { relayPermissionStatus, requestRelayPermissions } from './relay/permissions.js';
 import { relayStatus, relaySummary } from './relay/status.js';
 
@@ -287,8 +297,74 @@ async function handleRelayLinkTest() {
   }
 }
 
-/** Entering the relay screen: show real capability and ask the radios to be turned on.
+/**
+ * Save the signed relay packets as a file the citizen can transfer by hand.
  *
+ * This is the answer to "there is no relay node on this device": the packets are already
+ * source-signed, so the citizen can share the JSON over any channel the phone has (Bluetooth file
+ * transfer, a Wi-Fi Direct share, a USB cable, a nearby laptop) and a REACH relay node uploads them
+ * unchanged. The native share sheet is preferred; a plain download is the fallback.
+ */
+async function handleRelayExport() {
+  const statusEl = $('#relayExportStatus');
+  const button = $('#relayExportButton');
+  if (button) button.disabled = true;
+  if (statusEl) statusEl.textContent = 'Collecting your saved alerts…';
+  try {
+    const payload = await exportRelayPackets();
+    if (!payload.packets.length) {
+      if (statusEl) statusEl.textContent = 'No saved alerts to transfer yet. A report you send while offline is kept here.';
+      return;
+    }
+    const name = `reach-alert-${new Date().toISOString().slice(0,10)}.json`;
+    const text = JSON.stringify(payload, null, 2);
+    const file = new File([text], name, { type: 'application/json' });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'REACH alert packet', text: 'Signed REACH relay packets — hand these to a relay node.' });
+      if (statusEl) statusEl.textContent = `Shared ${payload.packets.length} alert packet${payload.packets.length === 1 ? '' : 's'}.`;
+    } else {
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      if (statusEl) statusEl.textContent = `Saved ${payload.packets.length} alert packet${payload.packets.length === 1 ? '' : 's'}. Transfer the file to a REACH relay phone.`;
+    }
+  } catch (error) {
+    // A cancelled share sheet is not a failure worth an error line.
+    if (statusEl) statusEl.textContent = /cancel|abort/i.test(String(error?.name || error?.message || '')) ? '' : (error?.message || 'Could not prepare the alert file.');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/**
+ * Receive a REACH alert file that someone transferred to this device and queue it for upload.
+ *
+ * The receiving half of "Save alert file to transfer": a citizen hands their signed packet file to
+ * this device (Bluetooth/Wi-Fi file transfer, USB, a nearby laptop) and it joins this device's relay
+ * queue, so it uploads to the gateway on the next connection — no radio peer required.
+ */
+async function handleRelayImport(input) {
+  const statusEl = $('#relayImportStatus');
+  const file = input?.files?.[0];
+  if (input) input.value = '';
+  if (!file) return;
+  if (statusEl) statusEl.textContent = 'Reading the alert file…';
+  try {
+    const text = await file.text();
+    const result = await importRelayPackets(JSON.parse(text));
+    if (statusEl) {
+      statusEl.textContent = result.accepted
+        ? `Accepted ${result.accepted} alert packet${result.accepted === 1 ? '' : 's'} — they upload as soon as there is a connection.`
+        : (result.skipped ? 'Nothing new in that file (already received or expired).' : 'That file did not contain a usable REACH alert.');
+    }
+    if (result.accepted) await refreshRelayProgress?.();
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error?.message || 'That file could not be read.';
+  }
+}
+
+/** Entering the relay screen: show real capability and ask the radios to be turned on.
  * The request runs inside the click gesture that got us here, so a browser that requires a user
  * gesture for Web Bluetooth still accepts it. A refusal is reported, never swallowed, and the
  * Continue button is never blocked by it.
@@ -325,6 +401,13 @@ async function handleCitizenRegistration() {
     // confusing "Failed to fetch ... then user exists" sequence.
     try { await updateProfile({ full_name:name, phone, relay_enabled:appState.relayEnabled }); }
     catch { /* profile sync retried by initBackendSync on the next connection */ }
+    // An optional estate join code binds the citizen to their estate so reports route to its desk.
+    // A bad code must not fail the registration; report it and continue.
+    const joinCode = $('#registerJoinCode')?.value?.trim();
+    if (joinCode) {
+      try { await joinInstitution(joinCode); await refreshEstateStatus(); }
+      catch (error) { alert(error?.message || 'That estate join code was not accepted. You can join later from your home screen.'); }
+    }
     return true;
   } catch (error) { alert(error.message || 'Account creation failed.'); return false; }
   finally { registrationInFlight = false; }
@@ -334,7 +417,7 @@ async function handleCitizenLogin() {
   const email = $('#loginEmail')?.value?.trim().toLowerCase() || '';
   const password = $('#loginPassword')?.value || '';
   if (!email || !password) { alert('Enter your email and password.'); return; }
-  try { await login({email,password}); await flushCitizenQueue(); navigateTo('relaypermission'); } catch (error) { alert(error.message || 'Unable to sign in.'); }
+  try { await login({email,password}); await flushCitizenQueue(); void refreshEstateStatus(); navigateTo('relaypermission'); } catch (error) { alert(error.message || 'Unable to sign in.'); }
 }
 
 async function flushCitizenQueue() {
@@ -684,6 +767,68 @@ async function refreshRelayProgress() {
   } catch { progress.textContent = ''; }
 }
 
+/** Show the estate this citizen is linked to, so it is clear where reports are routed. */
+function renderEstateChip(name) {
+  const chip = $('#homeEstateChip');
+  const text = $('#homeEstateText');
+  const joinBtn = $('#homeJoinEstate');
+  if (chip && text) {
+    if (name) { text.textContent = `Reports routed to ${name}`; chip.style.display = 'flex'; }
+    else { chip.style.display = 'none'; }
+  }
+  // Only offer the join entry once we know the server says this citizen is not linked yet.
+  if (joinBtn) joinBtn.style.display = name ? 'none' : 'block';
+}
+
+/**
+ * Fetch the signed-in profile and reflect the linked estate. Best-effort: an offline citizen
+ * keeps the cached value and the chip stays hidden until the server answers.
+ */
+async function refreshEstateStatus() {
+  if (!backendConfigured || !hasSession()) return;
+  try {
+    const profile = await getProfile();
+    if (profile?.institution_name) {
+      appState.user.estateName = profile.institution_name;
+      localStorage.setItem('reach_pwa_profile', JSON.stringify(appState.user));
+    }
+    renderEstateChip(profile?.institution_name || null);
+  } catch { /* keep whatever the cache showed */ }
+}
+
+/** Redeem a join code and bind this citizen to the estate. */
+async function submitEstateJoin() {
+  const input = $('#joinEstateCode');
+  const status = $('#joinEstateStatus');
+  const code = input?.value?.trim();
+  if (!code) { if (status) status.textContent = 'Enter the code your estate office gave you.'; return; }
+  if (!backendConfigured || !hasSession()) { if (status) status.textContent = 'Connect to the internet once to join an estate.'; return; }
+  if (status) status.textContent = 'Joining…';
+  try {
+    await joinInstitution(code);
+    if (input) input.value = '';
+    if (status) status.textContent = 'Joined. Your reports will now reach this estate.';
+    await refreshEstateStatus();
+  } catch (error) {
+    if (status) status.textContent = error?.message || 'That join code was not accepted.';
+  }
+}
+
+/** Offer the join screen right after a report, but only if this citizen is not linked yet. */
+function offerEstateJoinAfterReport() {
+  const btn = $('#trackingJoinEstate');
+  if (!btn) return;
+  if (!backendConfigured || !hasSession()) { btn.style.display = 'none'; return; }
+  void getProfile().then(profile => {
+    if (profile?.institution_id) {
+      btn.style.display = 'none';
+      renderEstateChip(profile.institution_name || null);
+    } else {
+      btn.style.display = 'block';
+    }
+  }).catch(() => { btn.style.display = 'none'; });
+}
+
 /**
  * On app open, ask the node to switch its radios on: Bluetooth first, then Wi-Fi.
  *
@@ -723,6 +868,7 @@ async function enhancedNavHandler(event) {
   if (target === 'location') { syncLocationScreen(); }
   if (target === 'relaynotify') { void renderRelayNotify(); }
   if (target === 'confirm') { void renderCaptureList(); }
+  if (target === 'join') { void refreshEstateStatus(); }
   if (target === 'tracking' && appState.currentScreen === 'confirm') {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -744,6 +890,7 @@ async function enhancedNavHandler(event) {
     }
     navigateTo(target);
     void trackActiveIncident();
+    offerEstateJoinAfterReport();
     return true;
   }
   return false;
@@ -752,12 +899,17 @@ async function enhancedNavHandler(event) {
 // Capture phase ensures the enhanced actions run before the generic navigation handler.
 document.addEventListener('click', (event) => { void enhancedNavHandler(event); }, true);
 
+const joinSubmit = $('#joinEstateSubmit');
+if (joinSubmit) joinSubmit.addEventListener('click', () => { void submitEstateJoin(); });
+
 const savedProfile = (() => { try { return JSON.parse(localStorage.getItem('reach_pwa_profile') || 'null'); } catch { return null; } })();
 if (savedProfile) Object.assign(appState.user, savedProfile);
 registerScreenRenderers({ history: renderIncidentHistory, relayProgress: refreshRelayProgress });
 initBackendSync();
 syncProfileIntoHome();
 syncNetworkUi();
+if (appState.user.estateName) renderEstateChip(appState.user.estateName);
+void refreshEstateStatus();
 void requestRadiosOnOpen();
 window.setInterval(() => { if (appState.currentScreen === 'home') void refreshRelayProgress(); }, 15000);
 const demoResolve = $('#demoResolveButton');

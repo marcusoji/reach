@@ -491,4 +491,27 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   a coarse one. A *failed* read drops back to the registered zone rather than leaving "GPS" selected
   with no coordinates. The row's status text is updated in place, and the static default no longer
   claims "Unavailable — no signal" before anything was attempted.
+- **A citizen joins an estate with a join code, not by creating an institution.** Migration `0022`
+  adds `invite_type='join'` to `institution_invites` and `join_institution_with_code(text)`. A join
+  code is institution-scoped (no email), keeps the redeemer's `citizen` role, is hashed and
+  single-use, and refuses a caller who is already linked to an institution — so it is not a
+  role-escalation or tenant-hopping primitive. It binds `profiles.institution_id`, so incidents
+  filed *after* the join are stamped with the estate (the desk sees them via `incidents_select`).
+  Incidents filed *before* the join keep `institution_id = NULL` and are **not** retroactively
+  reassigned; the migration header says so, and the UI offers "Join your estate" on the home screen
+  so a citizen links before reporting. RPCs: `create_institution_invite` / `create_staff_invite`
+  (wrapper) / `join_institution_with_code` / `list_institution_invites` / `revoke_institution_invite`.
+- **When there is no relay node and no internet, the citizen exports the signed packets as a file.**
+  `exportRelayPackets()` in `reach-citizen-pwa/js/backend.js` returns the live, unexpired signed
+  packets as a `reach-relay-packets` JSON document, offered through the native share sheet (download
+  fallback). The citizen hands that file to any REACH relay node over Bluetooth or Wi-Fi file
+  transfer; the packets are already source-signed, so the node uploads them unchanged and adds only
+  its own relay envelope. Dead-lettered and expired packets are excluded (the gateway rejects them).
+  The receiving half is `importRelayPackets()`, wired to "Receive an alert file" on the relay screen:
+  it sanity-checks structure and expiry, then queues each packet under its own key for upload, so a
+  node with no radio peer can still carry a file-transferred alert. The gateway binds the incident's
+  institution from the *source* device registration (`ingest_relay_packet_service`), not the
+  uploader, so a file handoff does not leak or mis-tenant the incident. `probeNativeRelay`'s "no
+  relay radio" message points at this path. Pinned by `scripts/tests/pwa-relay-export.mjs`
+  (CI: `test:pwa-relay-export`).
 

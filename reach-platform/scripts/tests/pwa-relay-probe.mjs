@@ -68,7 +68,8 @@ console.log('\n=== PWA relay link probe ===');
   reset();
   const result = await probeNativeRelay();
   ck('no node reports not ok', result.ok === false);
-  ck('no node explains why', /no relay node/i.test(result.detail));
+  ck('no node explains why', /no relay radio/i.test(result.detail));
+  ck('no node offers the file-transfer path', /transfer/i.test(result.detail));
 }
 {
   // 2. A node that accepts the packet and later reports a verified peer delivery.

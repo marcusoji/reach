@@ -149,6 +149,60 @@ export async function listRelayQueue(){
   const db=await openDb().catch(()=>null); if(!db) return [];
   return new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}).catch(()=>[]);
 }
+
+/**
+ * The signed relay packets waiting on this device, as a portable JSON document.
+ *
+ * A phone with no relay node and no internet can save this file and hand it to any REACH relay node
+ * over Bluetooth or Wi-Fi file transfer; the packets are already source-signed, so the receiving
+ * node uploads them unchanged (it adds only its own relay envelope). Expired and dead-lettered
+ * packets are excluded — the gateway would reject them.
+ */
+export async function exportRelayPackets(){
+  const rows=await listRelayQueue();
+  const now=Date.now();
+  const packets=rows
+    .filter(r=>r.state!=='dead_letter' && Number(r.packet?.e||0)>now)
+    .sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))
+    .map(r=>r.packet);
+  return {format:'reach-relay-packets',version:1,exported_at:new Date().toISOString(),packets};
+}
+
+/**
+ * Queue relay packets that were handed to this device as a file (the receiving half of the export).
+ *
+ * A relay node that has no radio peer can still receive a citizen's signed packets as a JSON file
+ * (Bluetooth/Wi-Fi file transfer, USB, etc.) and upload them on its next connection. The packets
+ * are already source-signed, so this only sanity-checks structure and expiry — the gateway is the
+ * authority on signatures and device registration, exactly as for a packet that arrived over the
+ * radio. Returns how many were accepted, skipped (expired/malformed/duplicate) and rejected.
+ */
+export async function importRelayPackets(input){
+  const list=Array.isArray(input)?input:(Array.isArray(input?.packets)?input.packets:null);
+  if(!list) throw new Error('Not a REACH relay packet file.');
+  const now=Date.now();
+  const db=await openDb();
+  const existing=await new Promise((resolve,reject)=>{const req=db.transaction(RELAY_STORE).objectStore(RELAY_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);}).catch(()=>[]);
+  const live=new Set(existing.filter(r=>r.state!=='dead_letter').map(r=>r.id));
+  let accepted=0, skipped=0, rejected=0;
+  for(const packet of list){
+    const valid=packet && typeof packet==='object'
+      && typeof packet.k==='string' && packet.k
+      && typeof packet.x==='string' && packet.x
+      && typeof packet.source_signature==='string' && packet.source_signature
+      && typeof packet.source_signed_payload==='string' && packet.source_signed_payload
+      && typeof packet.source_device_id==='string' && packet.source_device_id
+      && typeof packet.source_public_key==='string' && packet.source_public_key;
+    if(!valid){ rejected++; continue; }
+    if(!(Number(packet.e)>now)){ skipped++; continue; }
+    if(live.has(packet.k) || live.size>=RELAY_QUEUE_MAX_ITEMS){ skipped++; continue; }
+    try{
+      await new Promise((resolve,reject)=>{const tx=db.transaction(RELAY_STORE,'readwrite');tx.objectStore(RELAY_STORE).put({id:packet.k,packet,createdAt:now,attempts:0,state:'queued'});tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
+      live.add(packet.k); accepted++;
+    }catch{ rejected++; }
+  }
+  return {accepted,skipped,rejected};
+}
 export async function getIncident(id){return (await api(`/incidents/${encodeURIComponent(id)}`)).data;}
 
 const HISTORY_CACHE_KEY='reach_incident_history';
@@ -182,6 +236,10 @@ function readHistoryCache(){ try{ const raw=JSON.parse(localStorage.getItem(HIST
 function writeHistoryCache(rows){ try{ localStorage.setItem(HISTORY_CACHE_KEY,JSON.stringify(rows.slice(0,50))); }catch{ /* storage full or unavailable */ } }
 
 export async function updateProfile(patch){return (await api('/me',{method:'PATCH',body:JSON.stringify(patch)})).data;}
+/** The signed-in profile, including the estate this citizen belongs to (institution_name). */
+export async function getProfile(){return (await api('/me')).data;}
+/** Join an estate with an institution-issued join code, so this citizen's reports route to it. */
+export async function joinInstitution(code){return (await api('/citizen/join',{method:'POST',body:JSON.stringify({code})})).data;}
 export async function queueIncident(payload,idempotencyKey){const db=await openDb();const now=Date.now();await purgeExpired(db,now);const items=await allQueuedFromDb(db);if(items.length>=QUEUE_MAX_ITEMS){throw new Error('Offline emergency queue is full; reconnect to send pending emergencies before creating another queued report.');}await put(db,{id:idempotencyKey,payload,idempotencyKey,createdAt:now,attempts:0,nextAttemptAt:now});}
 export async function flushQueue(){
   if(!backendConfigured || !navigator.onLine || !hasSession()) return {sent:0,remaining:await queueCount(),dead:0};
@@ -310,7 +368,7 @@ export async function probeNativeRelay(){
     // No native node in this app: a plain browser (or a PWABuilder/TWA shell) can still hand a
     // packet to a nearby relay node over Web Bluetooth, so test that path instead of refusing.
     if(directRelayAvailable()) return probeDirectRelay();
-    return {ok:false,detail:'No relay node is available in this app.'};
+    return {ok:false,detail:'No relay radio is available here. Use “Save alert file to transfer” to hand your signed alert to a REACH relay phone over Bluetooth or Wi-Fi file transfer.'};
   }
   const key=`pwa-probe-${crypto.randomUUID()}`;
   const built=await buildRelayPacket({packetKey:key,incidentId:null,category:'test',priority:'low',title:'REACH relay test',description:'Relay link test — no emergency.',locationLabel:'Relay test',locationSource:'manual'});

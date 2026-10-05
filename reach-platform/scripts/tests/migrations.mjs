@@ -177,3 +177,19 @@ if (shadow.status !== 0) {
 }
 const shadowPassed = (shadow.stdout.match(/^PASS \d+/gm) || []).length;
 console.log(`PASS - RPC variable-shadowing suite: ${shadowPassed} assertions held (citizen creates institution, invite redemption, single-use invites).`);
+
+// Citizen institution-join suite (tests/citizen_institution_join.sql). Migration 0022 lets a
+// citizen join an existing estate with a join code so their incidents carry the estate's
+// institution_id (previously they were NULL and invisible to the desk). This exercises the
+// RPC end to end and pins the abuse cases: single-use, no tenant hop, no role escalation,
+// no cross-flavour redemption, tenant-scoped listing/revoke.
+const joinSuite = join(here, '..', '..', '..', 'tests', 'citizen_institution_join.sql');
+const joinRun = psql(['-d', dbName, '-v', 'ON_ERROR_STOP=1', '-f', joinSuite]);
+if (joinRun.status !== 0) {
+  const err = (joinRun.stderr || '').split('\n').find((l) => /ERROR/i.test(l)) || joinRun.stderr.trim();
+  console.error('FAIL - citizen institution-join suite failed.');
+  console.error(`  ${err.trim()}`);
+  process.exit(1);
+}
+const joinPassed = (joinRun.stdout.match(/^PASS \d+/gm) || []).length;
+console.log(`PASS - citizen institution-join suite: ${joinPassed} assertions held (join code links a citizen, single-use, no tenant hop, no role escalation).`);

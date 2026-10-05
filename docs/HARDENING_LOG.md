@@ -301,3 +301,50 @@ cross-tenant — incident surfaced PostgREST's raw `PGRST116` text ("Cannot coer
 result to a single JSON object"). It now uses `.maybeSingle()` and returns a clean
 `404 { error: 'Incident not found' }`; the global handler also stops echoing the
 `PGRST116` message (status was already correct).
+
+## 0026 Citizen estate join + offline alert file transfer
+
+**Context.** Two gaps in the offline emergency path surfaced from a live test.
+
+1. A plain citizen had no way to attach to an institution. `0002` let an institution invite
+   *staff* and *security-desk* only; the only institution path for a citizen was to *create* one,
+   which hands the caller the institution role. A resident's incident therefore carried
+   `institution_id = NULL` and the estate's desk never saw it.
+2. A device with no native relay node and no internet had no way to hand its signed alert to the
+   relay network. `probeNativeRelay` correctly reported "no relay node", but the only remaining
+   options were a live Web Bluetooth pairing (needs the relay app to advertise) or the queued
+   gateway path (needs connectivity).
+
+**Fix 1 — migration `0022_citizen_institution_join.sql`.**
+`institution_invites` gains an `invite_type` (`member` | `join`). A `join` invite is
+institution-scoped, has no email, and keeps the redeemer's `citizen` role. `join_institution_with_code(text)`
+links the profile to the invite's institution, records the membership and audits
+`membership.joined`. It rejects a caller who is not a citizen and a caller already linked to an
+institution, so it is neither a role-escalation nor a tenant-hopping primitive. The code is
+hashed with pgcrypto and single-use, like a staff invite. `create_institution_invite` and the
+`create_staff_invite` wrapper create either flavour; `list_institution_invites` /
+`revoke_institution_invite` manage pending codes for admins only. New RPCs are revoked from
+`anon`/PUBLIC and granted to `authenticated`. Joining binds the profile, so incidents filed
+*after* the join are stamped with the estate; incidents filed *before* the join are not
+retroactively reassigned (a backfill would be a separate workflow).
+
+**Fix 2 — offline alert file transfer (PWA).**
+`exportRelayPackets()` (js/backend.js) returns the live, unexpired signed packets as a
+`reach-relay-packets` JSON document; `handleRelayExport` offers them through the native share
+sheet (or a download fallback). A citizen with no radio path can save the file and hand it to any
+REACH relay node over Bluetooth or Wi-Fi file transfer — the packets are already source-signed,
+so the node uploads them unchanged (it adds only its own relay envelope). Dead-lettered and
+expired packets are excluded. The relay screen's "Test relay link" refusal now points at this
+path instead of a dead end.
+
+**Wiring.** Edge Function routes `POST /citizen/join`, `POST /invites` (`type:'join'`),
+`GET /institution/invites`, `DELETE /institution/invites/{id}`; `GET /me` now returns
+`institution_name`. Platform: `createJoinCode`/`listInstitutionInvites`/`revokeInstitutionInvite`/
+`joinInstitutionWithCode` in `reachApi.ts`, a resident join-code panel on the security-roster
+page, and a join card on the citizen portal. PWA: an optional join code on the register screen,
+a post-report "Join your estate" button, a home estate chip, and the join screen.
+
+**Verification.** `validate:migrations` 22/22 (citizen institution-join suite 9 assertions);
+`validate:all` green including two new DB-free PWA suites — `pwa-estate-join` (8) and
+`pwa-relay-export` (7); platform `build` passes. The join flow does not retroactively attribute
+pre-join incidents, which is stated in the migration header and the UI.

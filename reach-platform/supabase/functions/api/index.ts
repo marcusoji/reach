@@ -298,7 +298,16 @@ Deno.serve(async (req) => {
       return json({ data }, 201);
     }
 
-    if (path === '/me' && req.method === 'GET') return json({ data: { ...profile, email: user.email } });
+    if (path === '/me' && req.method === 'GET') {
+      // A citizen who joined an estate should see which one; the PWA reads institution_name to
+      // label the home screen. Resolved with the caller's own token, so RLS still scopes it.
+      let institutionName: string | null = null;
+      if (profile.institution_id) {
+        const { data: inst } = await supabase.from('institutions').select('name').eq('id', profile.institution_id).maybeSingle();
+        institutionName = inst?.name ?? null;
+      }
+      return json({ data: { ...profile, institution_name: institutionName, email: user.email } });
+    }
     if (path === '/me' && req.method === 'PATCH') {
       const body = await readJsonLimited(req);
       const patch: Record<string, unknown> = {};
@@ -402,15 +411,26 @@ Deno.serve(async (req) => {
     if (path === '/invites' && req.method === 'POST') {
       if (profile.role !== 'institution') return json({ error: 'Institution admin role required' }, 403);
       const body = await readJsonLimited(req);
+      const inviteType = textValue(body.type, 20) === 'join' ? 'join' : 'member';
+      if (inviteType === 'join') {
+        // A join code is institution-scoped, not person-scoped: the officer shares it with
+        // residents out-of-band and each redeems it once. No email is required.
+        const { data, error } = await supabase.rpc('create_institution_invite', {
+          p_email: null, p_role: 'citizen', p_type: 'join',
+          p_expires_hours: Math.min(Math.max(Number(body.expires_hours ?? 72), 1), 168),
+        });
+        if (error) throw error;
+        return json({ code: data, type: 'join' }, 201);
+      }
       const email = textValue(body.email, 254)?.toLowerCase();
       const role = textValue(body.role, 30);
       if (!email || !email.includes('@')) return json({ error: 'Valid email is required' }, 422);
       if (role !== 'staff' && role !== 'security-desk') return json({ error: 'Invalid invite role' }, 422);
-      const { data, error } = await supabase.rpc('create_staff_invite', {
-        p_email: email, p_role: role, p_expires_hours: Math.min(Math.max(Number(body.expires_hours ?? 72), 1), 168),
+      const { data, error } = await supabase.rpc('create_institution_invite', {
+        p_email: email, p_role: role, p_type: 'member', p_expires_hours: Math.min(Math.max(Number(body.expires_hours ?? 72), 1), 168),
       });
       if (error) throw error;
-      return json({ code: data }, 201);
+      return json({ code: data, type: 'member' }, 201);
     }
 
     if (path === '/invites/redeem' && req.method === 'POST') {
@@ -420,6 +440,35 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase.rpc('redeem_staff_invite', { p_code: code });
       if (error) throw error;
       return json({ data });
+    }
+
+    // A citizen joins an existing estate with an institution-issued join code, so their reports
+    // are attributed to that institution (previously institution_id was NULL and the desk never
+    // saw them). Works offline-then-sync too: the PWA queues this like any other call.
+    if (path === '/citizen/join' && req.method === 'POST') {
+      const body = await readJsonLimited(req);
+      const code = textValue(body.code, 80);
+      if (!code) return json({ error: 'Join code is required' }, 422);
+      const { data, error } = await supabase.rpc('join_institution_with_code', { p_code: code });
+      if (error) throw error;
+      return json({ data });
+    }
+
+    // Institution admins manage their own pending invites (join codes and staff invites).
+    if (path === '/institution/invites' && req.method === 'GET') {
+      if (!['institution', 'operator', 'super-admin'].includes(profile.role)) return json({ error: 'Institution admin role required' }, 403);
+      const { data, error } = await supabase.rpc('list_institution_invites');
+      if (error) throw error;
+      return json({ data: data ?? [] });
+    }
+    const inviteDeleteMatch = path.match(/^\/institution\/invites\/([^/]+)$/);
+    if (inviteDeleteMatch && req.method === 'DELETE') {
+      if (!['institution', 'operator', 'super-admin'].includes(profile.role)) return json({ error: 'Institution admin role required' }, 403);
+      const inviteId = requireUuid(inviteDeleteMatch[1]);
+      const { data, error } = await supabase.rpc('revoke_institution_invite', { p_id: inviteId });
+      if (error) throw error;
+      if (data !== true) return json({ error: 'Invite not found or already used' }, 404);
+      return json({ revoked: true });
     }
 
     if (path === '/incidents' && req.method === 'GET') {

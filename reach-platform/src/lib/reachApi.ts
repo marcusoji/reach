@@ -241,6 +241,10 @@ export async function getRelayHealth() { return apiFetch<{ data: any }>('/relay/
 export async function getSystemHealth() { return apiFetch<{ data: any[] }>('/system/health'); }
 export async function listAuditLogs() { return apiFetch<{ data: any[] }>('/audit'); }
 export async function createInvite(email:string, role:'staff'|'security-desk') { return apiFetch<{code:string}>('/invites',{method:'POST',body:JSON.stringify({email,role})}); }
+export async function createJoinCode(expiresHours = 72) { return apiFetch<{code:string;type:string}>('/invites',{method:'POST',body:JSON.stringify({type:'join',expires_hours:expiresHours})}); }
+export async function listInstitutionInvites() { return apiFetch<{data:any[]}>('/institution/invites'); }
+export async function revokeInstitutionInvite(id:string) { return apiFetch<{revoked:boolean}>(`/institution/invites/${id}`,{method:'DELETE'}); }
+export async function joinInstitutionWithCode(code:string) { return apiFetch<{data:any}>('/citizen/join',{method:'POST',body:JSON.stringify({code})}); }
 export async function createInstitution(payload: { name: string; category?: string; city?: string; address?: string }) { return apiFetch<{ institution_id: string }>('/institutions', { method: 'POST', body: JSON.stringify(payload) }); }
 export async function redeemInvite(code: string) { return apiFetch<{ data: any }>('/invites/redeem', { method: 'POST', body: JSON.stringify({ code }) }); }
 export async function provisionOperator(key: string) { return apiFetch<{ data: any }>('/operator/provision', { method: 'POST', body: JSON.stringify({ key }) }); }

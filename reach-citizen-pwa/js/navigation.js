@@ -110,6 +110,12 @@ export const SCREEN_CONFIG = {
     title: 'Packet transfer view',
     signal: 'yes',
     showStatusBar: true
+  },
+  join: {
+    index: 16,
+    title: 'Join an estate',
+    signal: 'yes',
+    showStatusBar: true
   }
 };
 

@@ -93,6 +93,11 @@
                 <select id="registerLocation"><option>Zone B — Hostel Block 4</option></select>
                 <div class="field-hint">Used if your device has no GPS during an emergency.</div>
               </div>
+              <div class="field">
+                <label>Estate / community join code (optional)</label>
+                <input id="registerJoinCode" type="text" value="" placeholder="REACH-XXXXXXXXXX" autocapitalize="characters">
+                <div class="field-hint">Ask your estate or community office for a code so your reports are routed to them.</div>
+              </div>
               <div class="stack">
                 <button class="btn-primary" data-nav="relaypermission">Create account</button>
                 <button class="btn-text" data-nav="login">Already have an account? Log in</button>
@@ -158,7 +163,12 @@
               <div class="stack" style="margin-bottom:10px;">
                 <button class="btn-primary" id="relayEnableButton">Turn on Bluetooth &amp; Wi-Fi</button>
                 <button class="btn-ghost" id="relayTestButton" type="button">Test relay link</button>
+                <button class="btn-ghost" id="relayExportButton" type="button">Save alert file to transfer</button>
+                <button class="btn-ghost" id="relayImportButton" type="button">Receive an alert file</button>
+                <input type="file" id="relayImportInput" accept="application/json,.json" style="display:none">
                 <p id="relayPermissionStatus" style="font-size:12px; color:var(--ink-500); line-height:1.5; margin:0; text-align:center;"></p>
+                <p id="relayExportStatus" style="font-size:12px; color:var(--ink-500); line-height:1.5; margin:0; text-align:center;"></p>
+                <p id="relayImportStatus" style="font-size:12px; color:var(--ink-500); line-height:1.5; margin:0; text-align:center;"></p>
               </div>
 
               <div class="stack">
@@ -183,6 +193,10 @@
               <span class="rd"></span><span>Relay participation is on — availability depends on supported relay hardware</span>
             </div>
             <div id="homeRelayProgress" style="padding:0 20px; margin-top:8px; font-size:11.5px; color:var(--ink-500); line-height:1.5;"></div>
+            <div id="homeEstateChip" class="relay-status-chip" style="margin-top:10px; display:none;">
+              <span class="rd"></span><span id="homeEstateText"></span>
+            </div>
+            <button class="btn-text" id="homeJoinEstate" data-nav="join" style="display:none; margin:8px auto 0;">Join your estate →</button>
             <button class="demo-trigger-btn" id="demoRelayButton" data-nav="relaynotify">▸ Demo: simulate an incoming relay notification</button>
             <div class="sos-zone" style="gap:14px;">
               <button class="sos-btn" data-nav="category">HOLD FOR<br>EMERGENCY</button>
@@ -384,8 +398,30 @@
               <div class="j-step"><div class="j-dot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div><div class="j-text"><b>Responder assigned</b><span id="trackingResponderState">Pending</span></div></div>
             </div>
             <div class="pad" style="padding-top:0;">
+              <button class="btn-ghost" id="trackingJoinEstate" data-nav="join" style="display:none;">Join your estate →</button>
               <button class="btn-ghost" id="demoResolveButton" data-nav="resolved">Demo: mark as resolved →</button>
               <button class="btn-text" data-nav="home" style="margin-top: 6px;">Return to Home</button>
+            </div>
+          </section>
+
+          <!-- =============================================================
+               SCREEN: Join an estate / community (optional, post-report)
+               ============================================================= -->
+          <section class="screen-view" id="screen-join" data-screen="join">
+            <div class="app-header">
+              <button class="back-btn" data-nav="tracking" aria-label="Back">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <h2>Join your estate</h2>
+            </div>
+            <div class="pad">
+              <p style="color:var(--ink-500); line-height:1.6;">If your estate, campus or community office gave you a join code, enter it here so your reports are routed to their response desk. You can do this later too.</p>
+              <div class="field"><label>Join code</label><input id="joinEstateCode" type="text" value="" placeholder="REACH-XXXXXXXXXX" autocapitalize="characters"></div>
+              <div id="joinEstateStatus" style="color:var(--ink-500); font-size:12.5px; min-height:18px;"></div>
+              <div class="stack">
+                <button class="btn-primary" id="joinEstateSubmit">Join</button>
+                <button class="btn-text" data-nav="home">Not now</button>
+              </div>
             </div>
           </section>
 
