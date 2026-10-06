@@ -534,3 +534,34 @@ three: no fabricated CCTV/telemetry strings, the dropdown reads `full_name`, the
 not render unpersisted values, and the relay-node identity registration / session handoff are
 present. `validate:all` green (121/121 AI, 76/76 migrations, 19/19 RLS, 12/12 ui-honesty, …).
 
+## Relay-path evidence rebind (server + client)
+
+Evidence captured before a report is sent is bound to the report's idempotency key, because the
+incident does not exist yet. On a relay-delivered report the incident is created server-side when
+*some* node uploads the packet, so the sender's capture stayed bound to a key that nothing ever
+resolved: it uploaded to Storage but was never registered against the incident, and the operator
+could not see it. That was the last documented relay-path gap (AGENTS.md "relay-path evidence never
+rebinds"). It is now closed on both sides.
+
+- **The packet key *is* the report key.** `sendOrQueueEmergency` signs the relay packet with
+  `packetKey = key` (the report's idempotency key) and binds the capture with
+  `bindEvidence({ reportKey: key })`, so the evidence row already holds everything needed to find
+  the incident later. No new client bookkeeping was needed.
+- **Server: `GET /relay/packets/:key`.** The ingest RPC already returns the created `relay_packets`
+  row (whose `incident_id` is set), so the sender's own upload can read the incident id straight
+  from the `POST /relay/packets` response. For a packet delivered by another node or an alert file —
+  never uploaded by this device — the new lookup route lets a client ask which incident a packet
+  became. It reads through RLS (`relay_select_scoped`), so a key belonging to another tenant is
+  indistinguishable from a missing one (404); it cannot be used to probe foreign packets.
+- **Client: rebind on upload and on every sync.** `flushRelayQueue` reads the incident id from the
+  ingest response (falling back to the lookup) and calls `rebindRelayEvidence(key, id)`, moving the
+  capture onto the real incident before it flushes. `reconcileRelayEvidence()` runs on every sync
+  and covers the handoff case: it collects the still report-keyed captures and repoints each one the
+  gateway reports as ingested. A key that has not been ingested yet 404s and is retried next sync —
+  nothing is fabricated.
+
+**Verification.** `scripts/tests/pwa-relay-evidence-rebind.mjs` (CI: `test:pwa-relay-evidence`, in
+`validate:all`) drives both paths against the real `backend.js`/`evidence.js`: the sender's upload
+repoints the capture and registers it against the real incident; a capture whose packet was uploaded
+by another node is reconciled on a later sync; and an un-ingested packet leaves the capture queued.
+`validate:all` green (12/12 new, 121/121 AI, 76/76 migrations, 19/19 relay queue, 26 evidence, …).

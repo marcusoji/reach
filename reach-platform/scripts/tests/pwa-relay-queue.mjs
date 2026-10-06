@@ -80,9 +80,12 @@ let fetchMode = 'ok';
 const sentBodies = [];
 globalThis.fetch = async (url, opts = {}) => {
   if (String(url).includes('/relay/packets')) {
+    // The GET lookup only happens after a successful POST that reported no incident; the ok stub
+    // below reports one, so this is never hit. Keep it explicit so the counter stays honest.
+    if (String(url).includes('/relay/packets/')) return { ok: false, status: 404, json: async () => ({ error: 'Packet not found' }) };
     if (fetchMode === 'fail') return { ok: false, status: 503, json: async () => ({ error: 'gateway unavailable' }) };
     sentBodies.push(JSON.parse(opts.body));
-    return { ok: true, status: 201, json: async () => ({ data: { packet_key: 'x' } }) };
+    return { ok: true, status: 201, json: async () => ({ data: { packet_key: 'x', incident_id: 'inc-test' } }) };
   }
   return { ok: false, status: 404, json: async () => ({}) };
 };

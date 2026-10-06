@@ -601,6 +601,21 @@ Deno.serve(async (req) => {
       return json({ data }, 201);
     }
 
+    // A relay-delivered report is created server-side, so the sender never sees the incident id at
+    // send time. This lets the sender (whose evidence capture is bound to the report's idempotency
+    // key) discover the incident once the gateway has ingested the packet and repoint the capture.
+    // RLS scopes the row to the reporter/institution, so a foreign key reads as 404.
+    const relayPacketGetMatch = path.match(/^\/relay\/packets\/([^/]+)$/);
+    if (relayPacketGetMatch && req.method === 'GET') {
+      let packetKey: string | null = null;
+      try { packetKey = textValue(decodeURIComponent(relayPacketGetMatch[1]), 200); } catch { packetKey = null; }
+      if (!packetKey) return json({ error: 'Packet key is required' }, 422);
+      const { data, error } = await supabase.from('relay_packets').select('packet_key,incident_id,status,received_at').eq('packet_key', packetKey).maybeSingle();
+      if (error) throw error;
+      if (!data) return json({ error: 'Packet not found' }, 404);
+      return json({ data });
+    }
+
 
     if (path === '/members' && req.method === 'GET') {
       if (!profile.institution_id) return json({ data: [] });

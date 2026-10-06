@@ -28,6 +28,9 @@ const QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
 // gateway, so it is dropped rather than retried; failed sends back off and dead-letter.
 const RELAY_QUEUE_MAX_ATTEMPTS = 8;
 const RELAY_QUEUE_MAX_ITEMS = 50;
+// Must match the relay packet TTL in relay/protocol.js and the server: past it a packet can no
+// longer be ingested, so there is nothing left to reconcile evidence against.
+const RELAY_PACKET_TTL_MS = 30 * 60 * 1000;
 const backendConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export { backendConfigured };
 
@@ -144,7 +147,14 @@ export async function flushRelayQueue(){
       if(handPacketToNativeRelay(item.packet)){ await remove(item.id); relayed++; }
       continue;
     }
-    try{ await sendRelayPacket(item.packet); await remove(item.id); sent++; }
+    try{
+      const info=await sendRelayPacket(item.packet); await remove(item.id); sent++;
+      // A relayed report is reconstructed server-side, so its incident id is only knowable after
+      // the gateway ingests the packet. The ingest response already carries it; fall back to a
+      // lookup (older gateway) before repointing any evidence captured for this report.
+      const incidentId=info?.incident_id || (await relayPacketIncident(item.packet?.k))?.incident_id;
+      if(incidentId) await rebindRelayEvidence(item.packet?.k, incidentId);
+    }
     catch(err){
       const attempts=Number(item.attempts||0)+1;
       const next={...item,attempts,lastError:String(err&&err.message||err).slice(0,300),nextAttemptAt:Date.now()+Math.min(120000,1000*Math.pow(2,attempts))};
@@ -366,6 +376,61 @@ async function rebindQueuedEvidence(reportKey, incidentId) {
   } catch { /* evidence stays queued; the next flush retries */ }
 }
 
+/**
+ * The incident a relay-delivered packet was reconstructed into.
+ *
+ * Returns null when the packet has not reached the gateway yet, so callers can simply retry on the
+ * next flush. Never throws: a lookup failure is the same as "not known yet".
+ */
+async function relayPacketIncident(packetKey) {
+  if (!packetKey) return null;
+  try { const result = await api(`/relay/packets/${encodeURIComponent(packetKey)}`); return result?.data || null; }
+  catch { return null; }
+}
+
+/**
+ * Repoint a report-keyed evidence capture onto the incident a relay packet became.
+ *
+ * The relay paths (native bridge, queued signed packet, nearby node) bind the capture to the
+ * report's idempotency key because the incident does not exist yet. This is the missing rebind:
+ * once the gateway has ingested the packet, the capture is moved onto the real incident id so the
+ * operator can see it attached rather than only uploaded.
+ */
+async function rebindRelayEvidence(reportKey, incidentId) {
+  try {
+    const { listEvidenceQueue } = await import('./evidence.js');
+    const rows = await listEvidenceQueue();
+    if (rows.some(row => row.incidentKey === reportKey && !row.incidentId)) await rebindQueuedEvidence(reportKey, incidentId);
+  } catch { /* evidence stays queued; the next flush retries */ }
+}
+
+/**
+ * Recover evidence for reports that were handed to the relay radio or an alert file.
+ *
+ * Those paths bind the capture to the report's idempotency key, and the report's incident is only
+ * created once some node uploads the packet — which may be another phone, long after this one is
+ * closed. The packet key stored on the evidence row *is* that report key, so on every sync this
+ * asks the gateway which relay packets have become incidents and repoints the matching captures.
+ * A key that has not been ingested yet simply 404s and is retried next time.
+ */
+export async function reconcileRelayEvidence(){
+  let keys=[];
+  try{
+    const { listEvidenceQueue } = await import('./evidence.js');
+    // Only captures bound to a *live* relay packet: once the packet's TTL has passed it can never be
+    // ingested (the gateway rejects it), so there is nothing left to reconcile and no reason to keep
+    // polling. `createdAt` is the capture time, which precedes the packet's expiry.
+    const now=Date.now();
+    keys=[...new Set((await listEvidenceQueue()).filter(r=>r.incidentKey && !r.incidentId && (now-Number(r.createdAt||0))<RELAY_PACKET_TTL_MS).map(r=>r.incidentKey))];
+  }catch{ return {checked:0,rebound:0}; }
+  let rebound=0;
+  for(const key of keys){
+    const info=await relayPacketIncident(key);
+    if(info?.incident_id){ await rebindRelayEvidence(key,info.incident_id); rebound++; }
+  }
+  return {checked:keys.length,rebound};
+}
+
 export function buildIncidentPayload(){const e=appState.emergency;const a=appState.aiDetection;return{
   category:e.category,title:`${e.categoryLabel} emergency`,description:`Citizen-confirmed ${e.categoryLabel.toLowerCase()} emergency from REACH PWA.`,priority:(e.priority||'high').toLowerCase(),source_channel:'pwa',delivery_method:navigator.onLine?'internet':'offline-queue',location_label:e.locationLabel,location_source:e.locationType==='gps'?'gps':e.locationType==='registered'?'registered':'manual',location_accuracy_m:e.locationAccuracyM,latitude:e.latitude,longitude:e.longitude,ai_confidence:Number(a.confidencePct||0),ai_fp_code:a.confidencePct?`FP-${String(e.category).toUpperCase()}-${Math.round(Number(a.confidencePct))}`:null,via_relay:false,location_context:{network:navigator.onLine?'online':'offline',relay_enabled:appState.relayEnabled}
 };}
@@ -496,7 +561,7 @@ export function initBackendSync(){
   // native relay node would never be handed the gateway session — leaving it with no uplink config
   // (and, before, no registered relay identity). Hand the restored session over once on startup.
   try { const restored=getSession(); if(restored?.access_token) syncNativeBridgeSession(restored); } catch {}
-  const flush=()=>{void flushQueue();void flushRelayQueue();void flushEvidenceQueue();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
+  const flush=()=>{void flushQueue();void flushRelayQueue();void flushEvidenceQueue();void reconcileRelayEvidence();};window.addEventListener('online',flush);window.setInterval(()=>{if(navigator.onLine)flush();},30000);flush();}
 
 /** Attach captures that already have an incident (or a queued report) to attach to. A row whose
  * emergency report has not been accepted yet is left for rebindQueuedEvidence to repoint. */

@@ -329,18 +329,24 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `recommend` decision; that separation is the point. The exact figures drift with the report's age
   (evidence ages out), so `scripts/tests/ai-engine.mjs` section F pins the qualitative claim --
   derived-only abstains, one captured image reaches `recommend` -- rather than the decimals.
-- **Known limitation — relay-path evidence never rebinds.** When a report is delivered by relay
-  (native bridge or queued signed packet), `sendOrQueueEmergency` binds the capture to the report's
-  idempotency key (`bindEvidence({ reportKey: key })`). Only the *queued-incident* path ever rebinds:
-  `rebindQueuedEvidence` is called from the queue flush (`backend.js:156`) with the real incident id,
-  but the relay path stores nothing for a later rebind — the native path only writes
-  `localStorage['reach_relay_packet_key']`, which has no reader, and `flushEvidenceQueue` passes
-  `row => row.incidentId || null`, so a row bound to a key is skipped forever. The capture therefore
-  uploads to Storage but is never registered against the incident, and the operator cannot see it.
-  Fixing it needs the relay ingest response to carry the created incident id (or a
-  packet-key → incident endpoint) so the client can repoint the row; that is a server + client change
-  and is deliberately left out of scope for the hackathon MVP. Until then, treat relay-path evidence
-  as upload-only.
+- **Relay-path evidence now rebinds.** When a report is delivered by relay (native bridge, queued
+  signed packet, or alert file), `sendOrQueueEmergency` binds the capture to the report's idempotency
+  key (`bindEvidence({ reportKey: key })`) because the incident does not exist yet. The key is the
+  packet's own `k`, and the incident is created server-side on ingest, so the rebind is done in two
+  ways that both key off `k`:
+  - The sender's own upload reads the created incident id out of the `POST /relay/packets` ingest
+    response (it returns the `relay_packets` row, whose `incident_id` is set) and calls
+    `rebindRelayEvidence(key, incidentId)` before the capture flushes. It falls back to
+    `GET /relay/packets/:key` for an older gateway.
+  - A packet delivered by another node or an alert file was never uploaded by this device, so
+    `reconcileRelayEvidence()` runs on every sync: it collects the still report-keyed captures and
+    asks the gateway which relay packets have become incidents (`GET /relay/packets/:key`), then
+    repoints the matches. A key that has not been ingested yet simply 404s and is retried.
+  `GET /relay/packets/:key` reads through RLS (`relay_select_scoped`), so a key belonging to another
+  tenant is indistinguishable from a missing one (404) — it cannot be used to probe foreign packets.
+  The native node's `packetStatus` only reports "delivered", not the incident id, so the export path
+  relies on the packet key (which is already in the evidence row) rather than a native result channel.
+  `scripts/tests/pwa-relay-evidence-rebind.mjs` (CI: `test:pwa-relay-evidence`) drives both paths.
 
 - **Reserved SQL keywords are a silent variable-shadowing trap in PL/pgSQL.** Migrations 0002/0012
   declared `current_role public.reach_role` inside `create_institution_for_current_user` and
