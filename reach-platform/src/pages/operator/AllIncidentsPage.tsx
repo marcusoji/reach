@@ -3,11 +3,12 @@ import { SectionHeader } from '../../components/common/SectionHeader';
 import { FilterPills } from '../../components/common/FilterPills';
 import { IncidentCard } from '../../components/incidents/IncidentCard';
 import { Button } from '../../components/common/Button';
+import { LoadingPanel } from '../../components/common/LoadingPanel';
 import { useApp } from '../../context/AppContext';
 import { uploadIncidentEvidence } from '../../lib/reachApi';
 
 export const AllIncidentsPage: React.FC = () => {
-  const { incidents, assessIncident } = useApp();
+  const { incidents, assessIncident, dataLoading } = useApp();
   const [filter, setFilter] = useState<string>('all');
   const [assessing, setAssessing] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
@@ -77,7 +78,9 @@ export const AllIncidentsPage: React.FC = () => {
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {filteredIncidents.length === 0 ? (
+        {dataLoading && !incidents.length ? (
+          <LoadingPanel label="Loading platform incidents…" />
+        ) : filteredIncidents.length === 0 ? (
           <div className="reach-card" style={{ textAlign: 'center', padding: '2.5rem' }}>
             <p style={{ color: 'var(--reach-text-secondary)', fontWeight: 600 }}>
               No platform incidents matching status "{filter}".

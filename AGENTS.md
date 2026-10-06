@@ -708,8 +708,21 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   seconds on a slow network — while the data was on its way. It reads as a failed setup/connection
   and is the same class of dishonest status the rest of the UI avoids. `AppContext` now exposes
   `dataLoading` (true until the first load settles, in a `finally`), and each page shows a
-  `LoadingPanel` while it is true, falling back to the unavailable message only when the load has
-  settled with no institution. A reload still flashes the loading panel, but never claims the
-  backend is missing while it is being fetched. Pinned by `ui-honesty.mjs`.
+  `LoadingPanel` (the boot robot, via `BotLoader`) while it is true, falling back to the unavailable
+  message only when the load has settled with no institution. The same cold-load window hit the
+  other roles' list pages (`LiveQueuePage`, `StaffTasksPage`, `AllIncidentsPage`,
+  `OperatorOverviewPage`), which rendered "No incidents/tasks" over an empty array before the first
+  fetch — they are gated on `dataLoading && !rows.length` too. Pinned by `ui-honesty.mjs`.
+- **The connection chip is tri-state, and a failed first load retries.** `backendOnline` was a
+  boolean initialised to `false`, so the institution Overview showed *"Backend unavailable"* during
+  the first fetch — the same lie as above, for the status row instead of the body. It is now
+  `backendStatus: 'checking' | 'online' | 'offline'` (the chip reads "Checking…" until the first load
+  settles) with `backendOnline` kept as the derived boolean for other callers. A first load that
+  genuinely fails (a cold tab whose session is still restoring) is retried three times with 2/4/8s
+  backoff and the loader stays up while a retry is pending, so the page heals itself instead of
+  sitting on a false "not connected" until a manual reload; the count is bounded and resets on
+  success. Concurrent loads (realtime event + 60s tick + retry, or StrictMode's double mount) are
+  coalesced through an `inFlight` ref so an older response cannot overwrite a newer one. Pinned by
+  `ui-honesty.mjs`.
 
 

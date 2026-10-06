@@ -113,14 +113,28 @@ console.log('\n=== UI honesty ===');
   // loading panel while `dataLoading` is true.
   const ctx = read('reach-platform/src/context/AppContext.tsx') || '';
   ck('AppContext exposes a dataLoading flag', /dataLoading/.test(ctx) && /setDataLoading/.test(ctx));
+  ck('AppContext reports a tri-state backend status (never "offline" while checking)',
+    /backendStatus/.test(ctx) && /'checking'/.test(ctx) && /setBackendStatus\('offline'\)/.test(ctx));
+  ck('AppContext retries a failed first load instead of sitting offline',
+    /retryCount/.test(ctx) && /setTimeout/.test(ctx));
+  ck('AppContext coalesces concurrent loads', /inFlight/.test(ctx));
+  const overview = read('reach-platform/src/pages/institution/OverviewPage.tsx') || '';
+  ck('institution Overview shows "Checking…" while the status is unknown',
+    /Checking…/.test(overview) && /backendStatus === 'checking'/.test(overview));
   for (const rel of [
     'reach-platform/src/pages/institution/OverviewPage.tsx',
     'reach-platform/src/pages/institution/SiteIncidentsPage.tsx',
     'reach-platform/src/pages/institution/BillingPlanPage.tsx',
     'reach-platform/src/pages/institution/SecurityRosterPage.tsx',
+    // The other roles' list pages have the same cold-load window: an empty array is rendered as
+    // "No incidents/tasks" before the first fetch settles.
+    'reach-platform/src/pages/security-desk/LiveQueuePage.tsx',
+    'reach-platform/src/pages/staff/StaffTasksPage.tsx',
+    'reach-platform/src/pages/operator/AllIncidentsPage.tsx',
+    'reach-platform/src/pages/operator/OperatorOverviewPage.tsx',
   ]) {
     const page = read(rel) || '';
-    ck(`${rel.split('/').pop()} distinguishes loading from unavailable`,
+    ck(`${rel.split('/').pop()} distinguishes loading from empty/unavailable`,
       /dataLoading/.test(page) && /LoadingPanel/.test(page));
   }
 }

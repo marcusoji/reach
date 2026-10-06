@@ -6,7 +6,7 @@ import { LoadingPanel } from '../../components/common/LoadingPanel';
 import { useApp } from '../../context/AppContext';
 
 export const OverviewPage: React.FC = () => {
-  const { institutions, incidents, backendOnline, dataLoading } = useApp();
+  const { institutions, incidents, backendStatus, dataLoading } = useApp();
   const currentInstitution = institutions[0];
   if (!currentInstitution) return dataLoading ? <LoadingPanel label="Loading institution…" /> : <div className="reach-card" style={{padding:'2rem'}}><h2>Institution data unavailable</h2><p style={{color:'var(--reach-text-secondary)',marginTop:8}}>Connect the REACH backend or finish institution setup to load live data.</p></div>; // Greenfield Estate
   const openCount = incidents.filter((i) => !['Resolved', 'Closed'].includes(i.status)).length;
@@ -62,12 +62,15 @@ export const OverviewPage: React.FC = () => {
             <KeyValueRow
               label="Status"
               value={
-                <span style={{ color: 'var(--status-success-text)', fontWeight: 700 }}>
-                  {backendOnline ? 'Online' : 'Backend unavailable'}
+                <span style={{ color: backendStatus === 'offline' ? 'var(--reach-brand)' : 'var(--status-success-text)', fontWeight: 700 }}>
+                  {backendStatus === 'checking' ? 'Checking…' : backendStatus === 'online' ? 'Online' : 'Backend unavailable'}
                 </span>
               }
             />
-            <KeyValueRow label="Relay backend" value={backendOnline ? 'Available' : 'Unavailable'} />
+            <KeyValueRow
+              label="Relay backend"
+              value={backendStatus === 'checking' ? 'Checking…' : backendStatus === 'online' ? 'Available' : 'Unavailable'}
+            />
             <KeyValueRow label="Operational incidents" value={openCount} />
           </div>
         </div>

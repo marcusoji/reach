@@ -4,12 +4,13 @@ import { SectionHeader } from '../../components/common/SectionHeader';
 import { StatCard } from '../../components/common/StatCard';
 import { FilterPills } from '../../components/common/FilterPills';
 import { IncidentCard } from '../../components/incidents/IncidentCard';
+import { LoadingPanel } from '../../components/common/LoadingPanel';
 import { useApp } from '../../context/AppContext';
 import { IncidentStatus } from '../../types';
 
 export const LiveQueuePage: React.FC = () => {
   const navigate = useNavigate();
-  const { incidents } = useApp();
+  const { incidents, dataLoading } = useApp();
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
 
   // Dynamic metric calculations
@@ -54,7 +55,9 @@ export const LiveQueuePage: React.FC = () => {
 
       {/* Incidents Queue List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {filteredIncidents.length === 0 ? (
+        {dataLoading && !incidents.length ? (
+          <LoadingPanel label="Loading the live queue…" />
+        ) : filteredIncidents.length === 0 ? (
           <div className="reach-card" style={{ textAlign: 'center', padding: '2.5rem' }}>
             <p style={{ color: 'var(--reach-text-secondary)', fontWeight: 600 }}>
               No incidents matching status "{selectedFilter}".

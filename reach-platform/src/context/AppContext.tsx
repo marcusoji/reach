@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Incident, IncidentStatus, StaffMember, StaffTask, InstitutionItem, PaymentRecord } from '../types';
 import { INITIAL_INCIDENTS } from '../data/incidents';
 import { INITIAL_STAFF, INITIAL_STAFF_TASKS } from '../data/staff';
@@ -18,6 +18,9 @@ interface AppContextType {
   institutions: InstitutionItem[];
   paymentHistory: PaymentRecord[];
   recordPayment: (amount?: string) => void;
+  // 'checking' until the first load settles, then 'online'/'offline'. A chip must never show
+  // "offline" while a first load is still in flight — that is the same lie as "data unavailable".
+  backendStatus: 'checking' | 'online' | 'offline';
   backendOnline: boolean;
   dataLoading: boolean;
   refreshIncidents: () => Promise<void>;
@@ -41,15 +44,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [staffTasks, setStaffTasks] = useState<StaffTask[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_STAFF_TASKS : []));
   const [institutions, setInstitutions] = useState<InstitutionItem[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_INSTITUTIONS : []));
   const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_PAYMENT_HISTORY : []));
-  const [backendOnline, setBackendOnline] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  // Kept for existing callers; it is exactly `backendStatus === 'online'`.
+  const backendOnline = backendStatus === 'online';
   // True until the first backend load settles. Pages that need `institutions[0]` must distinguish
   // "still loading" from "this account has no institution" — otherwise a cold reload briefly (and,
   // if the first fetch is slow, for seconds) claims "Institution data unavailable".
   const [dataLoading, setDataLoading] = useState(isBackendConfigured);
+  // One load at a time: a realtime event, the 60s fallback tick and a retry can all land together
+  // (and React StrictMode double-invokes the mount effect), so a second caller joins the in-flight
+  // request instead of firing a duplicate. Without this, two overlapping loads could settle out of
+  // order and the older one would overwrite the newer data.
+  const inFlight = useRef<Promise<void> | null>(null);
+  const retryCount = useRef(0);
+  const retryTimer = useRef<number | null>(null);
 
   const refreshIncidents = async () => {
     if (!isBackendConfigured) return;
+    if (inFlight.current) return inFlight.current;
     setDataLoading(true);
+    const run = (async () => {
     try {
       const [remote, responders, tasks] = await Promise.all([listIncidents(), listResponders().catch(() => ({ data: [] })), listTasks().catch(() => ({ data: [] }))]);
       setIncidents(remote.map(mapIncident));
@@ -62,9 +76,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })));
       // The billing summary is institution-scoped: it 403s for every other role and for an
       // institution with no billing row. That is not "the backend is down", so it is kept out of the
-      // outer try — a failure here must not flip the shared `backendOnline` flag to false and make
-      // every portal claim the backend is unavailable.
-      setBackendOnline(true);
+      // outer try — a failure here must not mark the shared status offline and make every portal
+      // claim the backend is unavailable.
+      setBackendStatus('online');
       try {
           const summary = await getInstitutionSummary();
           const inst = summary.data.institution;
@@ -72,8 +86,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setInstitutions([{ id:inst.id, code:inst.id.slice(0,8).toUpperCase(), name:inst.name, category:inst.category, plan:sub?.plan_name || 'REACH Full', status:sub?.status === 'active' ? 'Active' : sub?.status === 'trial' ? 'Grace' : 'Inactive', coverageCount:summary.data.members.length, residentsCount:summary.data.members.filter((m:any)=>m.membership_role==='citizen').length, staffCount:summary.data.members.filter((m:any)=>m.membership_role==='staff').length, securityCount:summary.data.members.filter((m:any)=>m.membership_role==='security-desk').length, nextCharge:sub?.current_period_end || '—', paymentApi:sub?.provider || 'BMONI Embedded', gracePeriod:sub?.status || 'trial' }]);
           setPaymentHistory((summary.data.payments || []).map((p:any) => ({ id:p.id, date:new Date(p.created_at).toLocaleDateString('en-GB'), code:p.provider_reference || p.id.slice(0,8), status:p.status === 'paid' ? 'Paid' : p.status === 'failed' ? 'Failed' : 'Pending', amount:p.amount ? `₦${Number(p.amount).toLocaleString()}` : undefined })));
         } catch { /* non-institution roles or unconfigured billing */ }
-    } catch { setBackendOnline(false); }
-    finally { setDataLoading(false); }
+      retryCount.current = 0;
+    } catch {
+      setBackendStatus('offline');
+      // A first load can fail on a cold tab (session still restoring) even though the backend is
+      // fine. Retry a few times with backoff so the page heals itself instead of sitting on a false
+      // "backend not connected" until the user reloads. The count is bounded so a genuinely-down
+      // backend does not spin forever, and it resets on the next success.
+      if (retryCount.current < 3 && retryTimer.current === null) {
+        const delay = 2000 * 2 ** retryCount.current;
+        retryCount.current += 1;
+        retryTimer.current = window.setTimeout(() => {
+          retryTimer.current = null;
+          void refreshIncidents();
+        }, delay);
+      }
+    }
+    finally {
+      // Keep the loader up while a retry is pending — "still trying" is more honest than flashing
+      // the failure panel for the 2-8s backoff window.
+      if (retryTimer.current === null) setDataLoading(false);
+    }
+    })();
+    inFlight.current = run.finally(() => { inFlight.current = null; });
+    return inFlight.current;
   };
 
   useEffect(() => {
@@ -81,13 +117,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!isBackendConfigured) return;
     const unsubscribe = subscribeToIncidentChanges(() => { void refreshIncidents(); });
     const fallbackTimer = window.setInterval(() => { void refreshIncidents(); }, 60000);
-    return () => { unsubscribe(); window.clearInterval(fallbackTimer); };
+    return () => {
+      unsubscribe();
+      window.clearInterval(fallbackTimer);
+      if (retryTimer.current !== null) { window.clearTimeout(retryTimer.current); retryTimer.current = null; }
+    };
   }, []);
 
   const updateIncidentStatus = (id: string, status: IncidentStatus) => {
     if (!isBackendConfigured && isDemoMode) { setIncidents(prev => prev.map(inc => inc.id === id ? { ...inc, status } : inc)); return; }
     const apiStatus = status.toLowerCase().replace(' ', '_');
-    void changeIncidentStatus(id, apiStatus).then(() => refreshIncidents()).catch(() => setBackendOnline(false));
+    void changeIncidentStatus(id, apiStatus).then(() => refreshIncidents()).catch(() => setBackendStatus('offline'));
   };
 
   // An assessment costs an external model query when a provider is configured, so this stays an
@@ -99,7 +139,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await refreshIncidents();
       return res.data ?? null;
     } catch {
-      setBackendOnline(false);
+      setBackendStatus('offline');
       return null;
     }
   };
@@ -108,10 +148,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const advanceTaskStatus = (taskId: string, newStatus: StaffTask['status']) => {
     if (!isBackendConfigured && isDemoMode) { setStaffTasks(prev => prev.map(task => task.id === taskId ? { ...task, status:newStatus } : task)); return; }
     const apiStatus = newStatus === 'On Scene' ? 'on_scene' : newStatus === 'Resolved' ? 'completed' : newStatus === 'Responding' ? 'responding' : 'accepted';
-    void changeTaskStatus(taskId, apiStatus).then(() => refreshIncidents()).catch(() => setBackendOnline(false));
+    void changeTaskStatus(taskId, apiStatus).then(() => refreshIncidents()).catch(() => setBackendStatus('offline'));
   };
   const recordPayment = (amount = '₦1,450,000.00') => { if (!isBackendConfigured && isDemoMode) setPaymentHistory(prev => [{ id:`pay-${Date.now()}`, date:new Date().toLocaleDateString('en-GB'), code:`PAY-${Date.now().toString().slice(-6)}`, status:'Paid', amount }, ...prev]); };
-  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, backendOnline, dataLoading, refreshIncidents }}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, backendStatus, backendOnline, dataLoading, refreshIncidents }}>{children}</AppContext.Provider>;
 };
 
 export const useApp = () => { const context = useContext(AppContext); if (!context) throw new Error('useApp must be used within an AppProvider'); return context; };

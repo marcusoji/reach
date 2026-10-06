@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotLoader } from './BotLoader';
 
 /**
  * Placeholder shown while the shared app data is still loading.
@@ -9,7 +10,6 @@ import React from 'react';
  */
 export const LoadingPanel: React.FC<{ label?: string }> = ({ label = 'Loading…' }) => (
   <div className="reach-card" style={{ padding: '2rem' }}>
-    <h2>{label}</h2>
-    <p style={{ color: 'var(--reach-text-secondary)', marginTop: 8 }}>Fetching live REACH data.</p>
+    <BotLoader label={label} />
   </div>
 );

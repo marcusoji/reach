@@ -3,11 +3,12 @@ import { SectionHeader } from '../../components/common/SectionHeader';
 import { StatCard } from '../../components/common/StatCard';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
+import { LoadingPanel } from '../../components/common/LoadingPanel';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 
 export const StaffTasksPage: React.FC = () => {
-  const { staffTasks, toggleTaskChecklist, advanceTaskStatus } = useApp();
+  const { staffTasks, toggleTaskChecklist, advanceTaskStatus, dataLoading } = useApp();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'todo' | 'responded'>('todo');
 
@@ -81,7 +82,9 @@ export const StaffTasksPage: React.FC = () => {
 
       {/* Task List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        {filteredTasks.length === 0 ? (
+        {dataLoading && !staffTasks.length ? (
+          <LoadingPanel label="Loading your task queue…" />
+        ) : filteredTasks.length === 0 ? (
           <div className="reach-card" style={{ textAlign: 'center', padding: '2.5rem' }}>
             <p style={{ color: 'var(--reach-text-secondary)', fontWeight: 600 }}>
               No tasks currently in the "{activeTab === 'todo' ? 'To-do' : 'Responded'}" queue.
