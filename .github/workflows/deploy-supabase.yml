@@ -49,6 +49,31 @@ jobs:
           echo "Setting REACH_ALLOWED_ORIGINS for the API."
           supabase secrets set REACH_ALLOWED_ORIGINS="$origins" --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
 
+      # Link the Helix (Launchverse) second-opinion provider. All three secrets must be present;
+      # if any is missing this step is a no-op so the deterministic engine keeps running alone
+      # rather than the provider being half-configured. Add them with:
+      #   gh secret set REACH_AI_ENDPOINT --body https://api.launchverse.app/api/v1/chat/completions
+      #   gh secret set REACH_AI_API_KEY  --body helix_...
+      #   gh secret set REACH_AI_MODEL    --body helix-advisor
+      # The key is a server-side secret only: never a VITE_ variable and never in config.js.
+      - name: Link AI provider (optional)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          AI_ENDPOINT: ${{ secrets.REACH_AI_ENDPOINT }}
+          AI_KEY: ${{ secrets.REACH_AI_API_KEY }}
+          AI_MODEL: ${{ secrets.REACH_AI_MODEL }}
+          AI_THRESHOLD: ${{ secrets.REACH_AI_BREAKER_THRESHOLD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AI_ENDPOINT:-}" ] || [ -z "${AI_KEY:-}" ] || [ -z "${AI_MODEL:-}" ]; then
+            echo "REACH_AI_* secrets are not all set; leaving the AI provider unconfigured (deterministic engine only)."
+            exit 0
+          fi
+          args=(REACH_AI_ENDPOINT="$AI_ENDPOINT" REACH_AI_API_KEY="$AI_KEY" REACH_AI_MODEL="$AI_MODEL")
+          if [ -n "${AI_THRESHOLD:-}" ]; then args+=(REACH_AI_BREAKER_THRESHOLD="$AI_THRESHOLD"); fi
+          echo "Linking AI provider $AI_MODEL at $AI_ENDPOINT."
+          supabase secrets set "${args[@]}" --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+
       - name: Deploy API Edge Function
         run: supabase functions deploy api --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:

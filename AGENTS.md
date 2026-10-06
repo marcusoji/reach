@@ -270,6 +270,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   credit exhaustion, 4xx/429, unreachable host, and out-of-vocabulary category. Each must map to the
   right `aiLastFailureKind`. The provider config is env-driven (`REACH_AI_ENDPOINT`/`_API_KEY`/`_MODEL`),
   the key is read only server-side (never a `VITE_` var), and `/system/health` reports the AI status.
+- **Linking Helix is a credential step, not a code change.** The adapter is already Helix-compatible,
+  so the whole integration is `supabase secrets set REACH_AI_ENDPOINT=https://api.launchverse.app/api/v1/chat/completions
+  REACH_AI_API_KEY=helix_… REACH_AI_MODEL=helix-advisor` (or the equivalent `REACH_AI_*` repo secrets,
+  which `deploy-supabase.yml`'s "Link AI provider (optional)" step reads and pushes; it is a no-op when
+  any is missing so the provider is never half-configured). `security-static.mjs` pins that the workflow
+  links all three together and that the key never becomes a `VITE_` variable. Verify the link with
+  `GET /system/health` (`AI provider: Healthy`) and `GET /ai/provider-events` (`ok` + `model:
+  helix-advisor`). The `lvse_…` account token is a different credential and is rejected by the
+  inference host — use the `helix_…` key. See `docs/DEPLOYMENT_RUNBOOK.md` §"Linking Helix".
 - The model's contribution is persisted in `ai_assessments.metadata` (migration `0014`), not just the
   audit log. Without it `model_agreement` cannot be queried back and the operator view can only show
   the fused result. The assessment is triggered deliberately by the operator (All Incidents → "Run AI

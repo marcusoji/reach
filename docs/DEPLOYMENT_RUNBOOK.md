@@ -167,6 +167,53 @@ Optional AI adapter (leave unset to keep AI purely local/heuristic):
 supabase secrets set REACH_AI_ENDPOINT= REACH_AI_API_KEY= REACH_AI_MODEL=
 ```
 
+### Linking Helix (Launchverse) as the second opinion
+
+The adapter is already Helix-compatible (neutral JSON-only prompt, leading-JSON recovery,
+breaker + failure telemetry). Linking it is only a credential step — three server-side
+secrets, no code change and no redeploy of the client:
+
+```bash
+supabase secrets set \
+  REACH_AI_ENDPOINT="https://api.launchverse.app/api/v1/chat/completions" \
+  REACH_AI_API_KEY="helix_…" \
+  REACH_AI_MODEL="helix-advisor"
+```
+
+Rules that matter (see `docs/HELIX_API_TEST_NOTES.md` for the evidence):
+
+- The key is a **model/inference key** (`helix_…`) on `api.launchverse.app`. The account
+  token (`lvse_…`) on `launchverse.app` is a *different* credential and is rejected by the
+  inference endpoint.
+- Use `helix-advisor`. The agentic models append an agent work report after the JSON, and
+  `helix-operator` is scope-blocked.
+- Set the three secrets together. The adapter reads all three or none; a partial set reports
+  `unconfigured` and the deterministic engine runs alone.
+- The key is server-side only — never a `VITE_` variable and never in `config.js`. This is
+  pinned by `security-static.mjs`.
+- CI links it for you: `deploy-supabase.yml` has a "Link AI provider (optional)" step that
+  reads the `REACH_AI_ENDPOINT` / `REACH_AI_API_KEY` / `REACH_AI_MODEL` repository secrets
+  (add them with `gh secret set …`) and is a no-op when they are absent.
+
+Verify the link after deploying, as an operator:
+
+```bash
+# 1. Health should read "Healthy" (not "Not configured"/"Circuit open"/"Degraded").
+curl -s -H "apikey: $ANON" -H "Authorization: Bearer $OPERATOR_JWT" \
+  "$API/system/health" | jq '.data[] | select(.service=="AI provider")'
+# 2. Run one assessment (All Incidents → "Run AI assessment"), then read the telemetry:
+curl -s -H "apikey: $ANON" -H "Authorization: Bearer $OPERATOR_JWT" \
+  "$API/ai/provider-events" | jq '.data[0]'
+```
+
+An `ok` provider event with `model: helix-advisor` means the second opinion is linked. A
+`failure` event carries a `failure_kind` (`unconfigured`, `breaker_open`, `http_error`,
+`network_error`, `unparsable_response`, `invalid_payload`) that names the cause — a
+`unparsable_response` with "credit balance exhausted" or a refusal means the credential is
+linked but the quota/scope is not usable. Note the Free tier is a **team-level 20
+queries/day** ceiling, so `model_agreement: 'none'` on some calls is normal, not a fault.
+
+
 `REACH_ALLOWED_ORIGINS` must exactly match your deployed frontend origins or CORS
 will reject them. Each entry is an exact origin, or a single-label wildcard such as
 `https://*.prod-runtime.all-hands.dev` (matches `https://x.prod-runtime.all-hands.dev`,

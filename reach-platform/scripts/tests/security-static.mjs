@@ -19,6 +19,7 @@ const reachApi = read('src/lib/reachApi.ts') || '';
 const envEx = read('.env.example') || '';
 const vercel = read('vercel.json') || '';
 const auth = read('src/context/AuthContext.tsx') || '';
+const deploy = read('../.github/workflows/deploy-supabase.yml') || '';
 
 function check(name, cond) {
   if (cond) pass.push(name); else fails.push(name);
@@ -43,6 +44,15 @@ check('CSP on Vercel', /Content-Security-Policy/i.test(vercel));
 check('HSTS on Vercel', /Strict-Transport-Security/i.test(vercel));
 check('No demo password in production path comment', !auth.includes('demo1234') || auth.includes('DEMO_USERS'));
 check('BMONI HTTPS-only', /https:/.test(read('supabase/functions/api/bmoni.ts') || ''));
+// The Helix/Launchverse key is a server-side secret. The deploy workflow is the only place the AI
+// config is linked, so pin that it reads the REACH_AI_* repo secrets, links all three together, and
+// never surfaces the key to the browser.
+check('Deploy workflow links the AI provider from REACH_AI_* secrets',
+  /REACH_AI_ENDPOINT/.test(deploy) && /REACH_AI_API_KEY/.test(deploy) && /REACH_AI_MODEL/.test(deploy));
+check('Deploy workflow links the AI secrets as a set (no partial config)',
+  /if \[ -z "\$\{AI_ENDPOINT:-\}" \] \|\| \[ -z "\$\{AI_KEY:-\}" \] \|\| \[ -z "\$\{AI_MODEL:-\}" \]/.test(deploy));
+check('AI provider key is never a VITE_ variable',
+  !/VITE_[A-Z_]*AI/i.test(api) && !/VITE_[A-Z_]*AI/i.test(reachApi) && !/VITE_[A-Z_]*AI/i.test(envEx));
 
 console.log('Security static checks');
 pass.forEach(p => console.log('PASS -', p));
