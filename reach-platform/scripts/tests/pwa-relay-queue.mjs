@@ -91,6 +91,7 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 
 const backend = await import(pathToFileURL(path.join(PWA, 'backend.js')).href);
+const protocol = await import(pathToFileURL(path.join(PWA, 'relay', 'protocol.js')).href);
 const { appState } = await import(pathToFileURL(path.join(PWA, 'state.js')).href);
 
 let pass = 0, fail = 0;
@@ -189,6 +190,45 @@ console.log('\n=== PWA relay queue ===');
   await offline();
   const r = await backend.flushRelayQueue();
   ck('offline without a native node keeps the packet queued', r.relayed === 0 && rows().length === 1, `relayed=${r.relayed} rows=${rows().length}`);
+}
+{
+  // 10. offline with a paired nearby relay node (plain browser, Web Bluetooth): the packet is
+  // written to the node and only leaves the queue on the node's verified ACK.
+  idb.clear('reach-offline', RELAY_STORE);
+  await offline();
+  const gatt = {};
+  gatt.device = { name: 'REACH Node', gatt: { connect: async () => gatt.server } };
+  const dataChar = { writes: [], writeValueWithResponse: async (frame) => { dataChar.writes.push(new Uint8Array(frame)); } };
+  const ackChar = {
+    listeners: [],
+    startNotifications: async () => true,
+    addEventListener(t, fn) { if (t === 'characteristicvaluechanged') this.listeners.push(fn); },
+    removeEventListener(t, fn) { this.listeners = this.listeners.filter((f) => f !== fn); },
+    emit(obj) { const buf = new TextEncoder().encode(JSON.stringify(obj)); const value = new DataView(buf.buffer.slice(0)); for (const fn of this.listeners) fn({ target: { value } }); },
+  };
+  const service = {
+    getCharacteristic: async (uuid) => (uuid === protocol.RELAY_DATA_UUID ? dataChar : ackChar),
+  };
+  gatt.server = { connect: async () => gatt.server, getPrimaryService: async () => service, disconnect: () => {} };
+  gatt.server.connect = async () => gatt.server;
+  gatt.device.gatt.connect = async () => gatt.server;
+  Object.defineProperty(globalThis.navigator, 'bluetooth', {
+    value: { requestDevice: async () => gatt.device }, configurable: true, writable: true,
+  });
+  await backend.pairDirectRelay();
+  dataChar.writeValueWithResponse = async (frame) => {
+    dataChar.writes.push(new Uint8Array(frame));
+    const total = frame[5];
+    if (dataChar.writes.length < total) return;
+    const HEADER = 6;
+    const packet = JSON.parse(new TextDecoder().decode(dataChar.writes.map((f) => f.slice(HEADER)).reduce((a, b) => new Uint8Array([...a, ...b]), new Uint8Array())));
+    queueMicrotask(() => ackChar.emit({ type: 'ACK', v: 2, k: packet.k, x: packet.x, accepted: true, receiver_device_id: 'node-1' }));
+  };
+  const r = await backend.flushRelayQueue();
+  ck('offline flush hands the packet to a paired nearby node', r.relayed === 1 && rows().length === 0, `relayed=${r.relayed} rows=${rows().length}`);
+  ck('the nearby node received the signed packet', dataChar.writes.length >= 1);
+  delete globalThis.navigator.bluetooth;
+  backend.disconnectDirectRelay?.();
 }
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);

@@ -75,6 +75,8 @@ export function relaySummary(status) {
   if (radio && radio.permissions && radio.advertising === false) return 'Relay is getting ready to carry packets.';
   if (status.capability.nativeRelay) return 'Ready to carry emergency packets nearby.';
   if (status.capability.directRelay) return 'Pair with a nearby relay node to hand it your alert.';
-  if (status.capability.bluetoothApi) return 'Ready to carry alerts nearby.';
-  return 'Ready to carry alerts nearby.';
+  // No native node and no Web Bluetooth hand-off: this browser cannot hand a packet to a relay
+  // node by itself. Claiming it can would be the exact dishonesty this module exists to avoid.
+  // Point at the paths that actually work — connectivity, or the saved alert file.
+  return 'This browser cannot carry alerts to a relay node on its own — your alert is sent when you have a connection, or save the alert file to hand to a relay phone.';
 }

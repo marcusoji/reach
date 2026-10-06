@@ -133,11 +133,19 @@ class WifiDirectRelay(private val context: Context) {
         }, 4_000)
     }
 
-    /** Start group-owner style listener that validates, enqueues, returns ACK. */
-    fun startAckServer(context: Context, onListening: (Boolean) -> Unit = {}, onPacket: (org.json.JSONObject) -> Unit) {
+    /**
+     * Start group-owner style listener that validates, enqueues, returns ACK.
+     *
+     * @return false only when the Wi-Fi Direct permission is missing, so the caller can retry once
+     *   the citizen grants it. True means the listener is starting (or that this device has no
+     *   Wi-Fi Direct radio at all, so retrying would never help).
+     */
+    fun startAckServer(context: Context, onListening: (Boolean) -> Unit = {}, onPacket: (org.json.JSONObject) -> Unit): Boolean {
         // Fail closed: without the Wi-Fi Direct permission the radio is unusable, and binding the
-        // listener anyway would advertise a relay path that can never complete a transfer.
-        if (manager == null || channel == null || !Permissions.wifiDirect(context)) return
+        // listener anyway would advertise a relay path that can never complete a transfer. Report
+        // "not started" so the service retries after the permission dialog.
+        if (manager == null || channel == null) return true
+        if (!Permissions.wifiDirect(context)) return false
         // Form an autonomous group and become its owner. Without this the node never joins a group,
         // so a peer that connects over Wi-Fi Direct has no owner address to reach and the ACK
         // listener is unreachable — the Wi-Fi half of the relay could never complete a transfer.
@@ -184,6 +192,7 @@ class WifiDirectRelay(private val context: Context) {
                 }
             } catch (_: Exception) {}
         }
+        return true
     }
 
     fun close() {

@@ -9,7 +9,7 @@ export const OperatorOverviewPage: React.FC = () => {
   const { incidents, institutions } = useApp();
   const [summary, setSummary] = useState<any>(null);
   useEffect(() => { if (isBackendConfigured) void getOperatorSummary().then(r=>setSummary(r.data)).catch(()=>undefined); }, []);
-  const openCount = summary?.activeCount ?? incidents.filter(i => i.status !== 'Resolved').length;
+  const openCount = summary?.activeCount ?? incidents.filter(i => !['Resolved', 'Closed'].includes(i.status)).length;
   const institutionCount = summary?.institutionCount ?? institutions.length;
   const recent = summary?.recent ?? incidents.slice(0,8).map(i=>({id:i.id,code:i.code,status:i.status,category:i.category,priority:'—',reported_at:i.timestamp}));
   return <div style={{display:'flex',flexDirection:'column',gap:'2rem'}}>

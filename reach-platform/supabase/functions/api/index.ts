@@ -766,6 +766,9 @@ Deno.serve(async (req) => {
         (id) => bmoni.createManagedWallet(id, { currency: 'CNGN', userOwnerAddress: walletAddress, ownerProofChallengeId: challengeId, ownerProofSignature: signature }),
         (healed) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {}));
       const walletId = result?.smartWalletId || result?.id || result?.smartWallet?.id;
+      // Prefer the address the provider echoes; fall back to the owner address the client proved
+      // ownership of via the owner-proof signature (the challenge was bound to it), so an echo-less
+      // response does not block the next onboarding step.
       const returnedAddress = result?.walletAddress || result?.address || result?.smartWallet?.address || walletAddress;
       if (!walletId) return json({ error: 'BMONI did not return a smart wallet id' }, 502);
       const { data, error: updateError } = await service.from('bmoni_institution_accounts').update({ smart_wallet_id: String(walletId), wallet_address: returnedAddress, onboarding_status: 'wallet_created' }).eq('institution_id', profile.institution_id).select().single();
@@ -824,9 +827,18 @@ Deno.serve(async (req) => {
       if (error || !account?.bmoni_user_id) return json({ error: 'BMONI payer account is not configured' }, 409);
       const service = requireService();
       const heal = (healed: string) => service.from('bmoni_institution_accounts').update({ bmoni_user_id: healed }).eq('institution_id', profile.institution_id).then(() => {});
+      // Rail provisioning is asynchronous: start-nigeria returns before the rail is active, and
+      // until `anchorStatus == 'active'` the NGN endpoint lists only the shared pooled account.
+      // Reading the deposit account does NOT mean onboarding finished, so verify the real rail
+      // state and only then record the account as ready. Claiming `ngn_virtual_account_ready`
+      // (and status `active`) on a mere read is how a pooled account got mistaken for a
+      // dedicated one and how a never-provisioned rail looked finished.
+      const status = await withBmoniUserId(account, (id) => bmoni.onboardingStatus(id), heal);
+      const anchorActive = String(status?.anchorStatus ?? '').toLowerCase() === 'active';
+      if (!anchorActive) return json({ data: { ...status, anchorStatus: status?.anchorStatus ?? 'not_started', deposit_account: null, ngn_virtual_account_ready: false, note: 'Rail provisioning is still in progress; the NGN virtual account appears once anchorStatus is active.' } });
       const result = await withBmoniUserId(account, (id) => bmoni.depositAccount(id), heal);
       await service.from('bmoni_institution_accounts').update({ ngn_virtual_account_ready: true, onboarding_status: 'active' }).eq('institution_id', profile.institution_id);
-      return json({ data: result });
+      return json({ data: { ...result, anchorStatus: status?.anchorStatus ?? 'active', ngn_virtual_account_ready: true } });
     }
 
     if (path === '/institution/billing/bmoni/payment/proposal' && req.method === 'POST') {

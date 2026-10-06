@@ -565,3 +565,70 @@ rebinds"). It is now closed on both sides.
 repoints the capture and registers it against the real incident; a capture whose packet was uploaded
 by another node is reconciled on a later sync; and an un-ingested packet leaves the capture queued.
 `validate:all` green (12/12 new, 121/121 AI, 76/76 migrations, 19/19 relay queue, 26 evidence, …).
+
+## BMONI onboarding honesty + relay transports that retry after a late grant
+
+Two "the UI claims more than the system knows" defects surfaced on a live pass.
+
+**BMONI onboarding was marked ready by a read, not by the rail.**
+`GET /institution/billing/bmoni/deposit-account` read the NGN endpoint and, on any
+successful read, wrote `ngn_virtual_account_ready: true` and `onboarding_status: 'active'`.
+But rail provisioning is asynchronous: `start-nigeria` returns before `anchorStatus`
+becomes `active`, and until it does the endpoint lists only the **shared pooled** account.
+A pooled account was therefore recorded as a dedicated one, and a rail that had never
+provisioned looked finished. The route now reads `onboardingStatus` first and returns
+`deposit_account: null` with an explicit note while `anchorStatus != 'active'`; it marks the
+account ready only once the rail is genuinely active. The billing setup checklist derived
+"Nigeria onboarding" from `bvn_verified`, which `start-nigeria` sets the moment the BVN is
+*submitted* — so it, too, now derives from `onboarding_status`. The sandbox demo no longer
+reads a pooled deposit account while the rail is inactive.
+
+**Relay transports did not retry after a late permission grant.**
+`RelayService.onCreate` started each transport once. `WifiDirectRelay.startAckServer`
+returned early when the Wi-Fi Direct permission was missing, but the service still treated
+the transport as started, and `MainActivity.startRelayServiceIfPermitted()` is a no-op when
+the service is already running. So a citizen who granted Bluetooth or Wi-Fi *after* launch
+(which the app itself asks for on the permission screen) left that transport dead until the
+process was killed — the node advertised "listening" from a snapshot while half of it could
+never carry a packet. `startAckServer` and `startRelay` now report whether they actually
+started, `startTransports()` is idempotent and retried from `onStartCommand` (which the
+activity re-fires after the permission dialog), `onResume`, and the 30s maintenance tick.
+`Permissions.wifiDirect` remains the fail-closed gate.
+
+**Verification.** `scripts/tests/ui-honesty.mjs` pins the BMONI route/checklist honesty;
+`relay-node-android` `RelayTransportRetryTest` pins that the Wi-Fi listener reports
+not-started without the permission and starts once it is granted. Android
+`assembleDebug lint testDebugUnitTest` green (125 tests, 0 lint errors); `validate:all` green
+(22 migrations, 19/19 RLS, 18/18 ui-honesty, …).
+
+## Submission-readiness pass — relay honesty, offline handoff, open-incident counts
+
+A full pre-submission pass (recon → all CI gates locally → Edge Functions / migrations+RLS / platform
+UI / citizen PWA / Android audit) surfaced three "the UI claims more than the system knows" defects
+and closed them.
+
+**A plain browser with no relay transport claimed it could carry packets.**
+`js/relay/status.js`'s `relaySummary` ended with an unconditional
+`'Ready to carry alerts nearby.'`, and `js/relay/permissions.js` returned "Your alert is carried to
+REACH through the nearby relay network" from its `unavailable` branch. On a browser with no native
+relay node and no Web Bluetooth hand-off — exactly the "no relay node available on this device"
+screen — neither claim can be true. Both now name the paths that actually work (connectivity, or
+"Save alert file to transfer"), and `app.js`'s relay-status catch line no longer says "Relaying an
+emergency alert nearby." when the status could not be read.
+
+**A paired nearby node was ignored on the offline flush.**
+`flushRelayQueue` handed an offline packet only to the native bridge. A plain browser that had
+already paired a nearby node over Web Bluetooth queued the packet and waited for connectivity,
+wasting the pairing. It now falls back to `sendPacketViaDirectRelay` — delivery is still claimed only
+on the node's verified ACK — when a connection exists.
+
+**Open-incident counts treated only `Resolved` as terminal.**
+`LiveQueuePage`, `OverviewPage` and `OperatorOverviewPage` filtered `status !== 'Resolved'`, so a
+`Closed` incident still counted as open. They now exclude `['Resolved','Closed']`.
+
+**Verification.** `scripts/tests/pwa-relay-status.mjs` (14/14), `pwa-relay-permissions.mjs` (13/13)
+and `pwa-relay-queue.mjs` (21/21, incl. the new paired-node offline handoff) pin the PWA changes;
+`ui-honesty.mjs` (22/22) pins the status/permission wording and the open-count logic. Full local run:
+`validate:all` 423/423 across all suites (22 migrations, RLS 19/19, rpc-contract 23/23, providers +
+BMONI live with Deno), `npm run build` clean, PWA syntax + protocol + evidence-capture gates pass,
+and the Android gate (`assembleDebug lint testDebugUnitTest`) is green at 125 tests / 0 lint errors.

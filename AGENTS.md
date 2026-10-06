@@ -641,8 +641,55 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   auto-push toggle that does nothing. `DeskSettings` and `INITIAL_DESK_SETTINGS` were dropped from
   the context.
 
+- **A relay transport that cannot start yet must report it, and the service must retry it.** The
+  citizen is asked for Bluetooth/Wi-Fi permissions on the relay screen, so a grant often arrives
+  *after* `RelayService.onCreate`. `WifiDirectRelay.startAckServer` returns `Boolean` — `false` only
+  when `Permissions.wifiDirect` is missing (it returns `true` when there is no Wi-Fi Direct radio at
+  all, since retrying would never help), and `startRelay()` returns `false` while the Bluetooth
+  permission/radio is missing. `RelayService.startTransports()` is idempotent (`bleStarted` /
+  `wifiStarted` guards) and is retried from `onStartCommand` (which `MainActivity` re-fires after
+  the permission dialog), `onResume`, and the 30s maintenance tick. Do not mark a transport started
+  without checking that call's return value, and do not make `startAckServer` return early silently —
+  that is what left one radio dead until the process was killed. Pinned by
+  `RelayTransportRetryTest` in `relay-node-android`.
+
+- **BMONI rail state is asynchronous; a read of the NGN endpoint is not proof of onboarding.**
+  `start-nigeria` returns before `anchorStatus` becomes `active`, and until it does the NGN endpoint
+  lists the shared pooled account. `GET /institution/billing/bmoni/deposit-account` must read
+  `onboardingStatus` first and only mark `ngn_virtual_account_ready` / `onboarding_status: 'active'`
+  when `anchorStatus == 'active'`; otherwise return `deposit_account: null`. The billing setup
+  checklist derives "Nigeria onboarding" from `onboarding_status`, not `bvn_verified` (which
+  `start-nigeria` sets on *submission*). Pinned by `scripts/tests/ui-honesty.mjs`.
+
 - **`ui-honesty.mjs` is the static guard for these UI defects** (CI: `test:ui-honesty`, wired into
   `validate:all`). It fails if a fabricated CCTV/telemetry string returns to `MediaChips`, if the
   responder dropdown stops reading `full_name`, if the desk-settings page renders unpersisted
-  values, or if the relay-node identity registration / session handoff is removed.
+  values, if the relay-node identity registration / session handoff is removed, if a relay status
+  line falls back to an unconditional "Ready to carry alerts nearby." for a browser with no
+  transport, or if an open-incident count stops treating `Closed` as terminal.
+
+- **A browser with no native node and no Web Bluetooth must not claim it can relay.**
+  `js/relay/status.js`'s `relaySummary` previously ended with an unconditional
+  `'Ready to carry alerts nearby.'` fallback, and `js/relay/permissions.js` returned
+  "Your alert is carried to REACH through the nearby relay network" from its `unavailable`
+  branch — both claim a delivery that cannot happen on a plain browser with no Web Bluetooth
+  hand-off (which is exactly the "no relay node available on this device" screen). They now
+  name the paths that actually work: connectivity, or "Save alert file to transfer". The
+  `app.js` catch-fallback for an unreadable relay status was likewise changed from "Relaying
+  an emergency alert nearby." to an honest "kept on this device" line.
+
+- **A paired nearby node is used offline, not just on the send path.**
+  `flushRelayQueue` only handed an offline packet to the *native* bridge; a plain browser that
+  had paired a nearby node over Web Bluetooth queued the packet and waited for connectivity,
+  wasting the pairing. It now falls back to `sendPacketViaDirectRelay` (delivery claimed only
+  on the node's verified ACK) when `directRelayAvailable() && directRelayConnection()`.
+  `scripts/tests/pwa-relay-queue.mjs` (CI: `test:pwa-relay`) drives both the native handoff
+  and the paired-node handoff.
+
+- **Open-incident counts treat `Closed` as terminal, not only `Resolved`.**
+  `LiveQueuePage`, `OverviewPage` and `OperatorOverviewPage` filtered `status !== 'Resolved'`,
+  so a closed incident still counted as open. They now exclude `['Resolved','Closed']` (matching
+  `operator/summary`'s `activeCount`, which already excluded cancelled too). Pinned by
+  `ui-honesty.mjs`.
+
 

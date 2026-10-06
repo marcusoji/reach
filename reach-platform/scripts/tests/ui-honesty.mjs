@@ -66,6 +66,46 @@ console.log('\n=== UI honesty ===');
   ck('PWA re-hands the restored session to the native bridge on launch',
     /initBackendSync/.test(backend) && /syncNativeBridgeSession/.test(backend));
 }
+{
+  // BMONI onboarding honesty: the rail is provisioned asynchronously, so a read of the NGN
+  // endpoint must not mark the account ready, and the setup checklist must reflect the real
+  // rail state rather than a flag that only a successful start sets.
+  const api = read('reach-platform/supabase/functions/api/index.ts') || '';
+  const deposit = api.slice(api.indexOf("'/institution/billing/bmoni/deposit-account'"));
+  ck('deposit-account verifies anchorStatus before marking the account ready',
+    /anchorStatus/.test(deposit.slice(0, 2400)) && /ngn_virtual_account_ready: true/.test(deposit.slice(0, 2400)));
+  ck('deposit-account does not mark ready on a not-yet-active anchor',
+    /anchorActive/.test(deposit.slice(0, 2400)) && /if \(!anchorActive\)/.test(deposit.slice(0, 2400)));
+
+  const billing = read('reach-platform/src/pages/institution/BillingPlanPage.tsx') || '';
+  ck('billing setup checklist derives onboarding from the rail status, not bvn_verified',
+    !/Boolean\(account\?\.bvn_verified\)/.test(billing) && /onboarding_status/.test(billing));
+  ck('billing sandbox demo does not read a pooled deposit account while the rail is inactive',
+    /anchor/.test(billing) && !/deposit\?\.data\?\.accounts\?\.find/.test(billing));
+}
+{
+  // Relay honesty: a browser with no native node and no Web Bluetooth must not claim it can carry
+  // a packet. The status line and the permission result must point at the paths that actually work.
+  const status = read('reach-citizen-pwa/js/relay/status.js') || '';
+  const permissions = read('reach-citizen-pwa/js/relay/permissions.js') || '';
+  ck('relay status never falls through to an unconditional "ready to carry"',
+    !/return 'Ready to carry alerts nearby\.';/.test(status));
+  ck('relay status tells a transportless browser how to actually send',
+    /cannot carry alerts to a relay node on its own/i.test(status));
+  ck('relay permissions does not promise delivery with no transport',
+    !/carried to REACH through the nearby relay network/i.test(permissions));
+}
+{
+  // Open-incident counts must treat Closed as terminal, not only Resolved.
+  for (const rel of [
+    'reach-platform/src/pages/security-desk/LiveQueuePage.tsx',
+    'reach-platform/src/pages/institution/OverviewPage.tsx',
+    'reach-platform/src/pages/operator/OperatorOverviewPage.tsx',
+  ]) {
+    const page = read(rel) || '';
+    ck(`${rel.split('/').pop()} counts Closed as terminal`, /'Closed'/.test(page) && !/status !== 'Resolved'\)/.test(page));
+  }
+}
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

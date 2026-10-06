@@ -95,6 +95,9 @@ export async function requestRelayPermissions() {
   return {
     granted: false,
     mode: 'unavailable',
-    detail: 'Relay is ready. Your alert is carried to REACH through the nearby relay network.',
+    // No native node and no Web Bluetooth: this browser cannot hand a packet to a relay node by
+    // itself. Say so, and name the paths that do work, rather than promising a delivery that
+    // cannot happen.
+    detail: 'This browser cannot relay to a nearby node on its own. Your alert is sent when you have a connection, or save the alert file to hand to a relay phone.',
   };
 }

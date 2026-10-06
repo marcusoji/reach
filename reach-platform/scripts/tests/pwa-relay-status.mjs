@@ -80,5 +80,15 @@ console.log('\n=== PWA relay status ===');
   ck('Wi-Fi-only listening node reports ready', /^Ready to carry/i.test(relaySummary(status)));
 }
 
+{
+  // 7. A plain browser with no native node and no Web Bluetooth hand-off must not claim it can
+  // relay. There is no transport it can use, so "Ready to carry alerts" would be a fabrication.
+  reset();
+  globalThis.window.REACH_RELAY_QUEUE = { listRelayQueue: async () => [], listRelayDeadLetter: async () => [] };
+  const status = await relayStatus();
+  ck('a transportless browser is not called ready', !/^Ready to carry/i.test(relaySummary(status)), relaySummary(status));
+  ck('a transportless browser is told how to actually send', /connection|save the alert file/i.test(relaySummary(status)));
+}
+
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 if (fail) process.exit(1);

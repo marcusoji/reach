@@ -58,7 +58,9 @@ export const BillingPlanPage: React.FC = () => {
   const setupSteps = useMemo(() => [
     ['BMONI payer account', Boolean(account?.bmoni_user_id)],
     ['CNGN smart wallet', Boolean(account?.smart_wallet_id)],
-    ['Nigeria onboarding', Boolean(account?.bvn_verified)],
+    // Onboarding is "started" once the rail is submitted; the account flag is only set by the
+    // rail's real state, not by a mere read (see the deposit-account route).
+    ['Nigeria onboarding', ['ngn_started', 'active'].includes(account?.onboarding_status)],
     ['NGN virtual account', Boolean(account?.ngn_virtual_account_ready)],
   ] as const, [account]);
 
@@ -120,12 +122,20 @@ export const BillingPlanPage: React.FC = () => {
           ? 'Already active for this institution.'
           : 'Runs after the wallet exists; simulated for the MVP.');
       }
-      // 5. NGN virtual account — real read-only sandbox call when a wallet exists.
+      // 5. NGN virtual account — real read-only sandbox call when a wallet exists. The rail is
+      // provisioned asynchronously, so a not-yet-active anchor means no dedicated account is
+      // issued; the step reports that instead of implying the account exists.
       if (hasWallet) {
         const status = await getBmoniOnboardingStatus();
-        const deposit = await getBmoniDepositAccount();
-        const accountNumber = deposit?.data?.accounts?.find((a: any) => a.currency === 'NGN')?.accountNumber;
-        add('deposit', 'live', `anchorStatus: ${status?.data?.anchorStatus ?? 'unknown'}${accountNumber ? `; NGN account ${accountNumber}` : ''}.`);
+        const anchor = String(status?.data?.anchorStatus ?? 'unknown');
+        if (anchor.toLowerCase() !== 'active') {
+          add('deposit', 'live', `anchorStatus: ${anchor} — rail still provisioning; the NGN account is not issued yet.`);
+        } else {
+          const deposit = await getBmoniDepositAccount();
+          const accounts = deposit?.data?.accounts;
+          const accountNumber = Array.isArray(accounts) ? accounts.find((a: any) => a.currency === 'NGN')?.accountNumber : undefined;
+          add('deposit', 'live', `anchorStatus: active${accountNumber ? `; NGN account ${accountNumber}` : '; dedicated NGN account issued'}.`);
+        }
       } else {
         add('deposit', 'simulated', 'Runs after onboarding; simulated for the MVP.');
       }

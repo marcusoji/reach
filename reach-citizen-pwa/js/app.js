@@ -258,7 +258,7 @@ async function handleRelayPermissionRequest() {
     if (statusEl) {
       statusEl.textContent = result.granted
         ? (result.detail || 'Relay radios are ready.')
-        : (result.detail || 'Relay is ready to carry your alert through nearby REACH devices.');
+        : (result.detail || 'This device cannot relay on its own. Your alert is sent when you have a connection, or save the alert file to hand to a relay phone.');
     }
     if (result.granted) {
       setRelayEnabled(true);
@@ -771,7 +771,7 @@ async function renderRelayNotify() {
     const status = await relayStatus();
     text.textContent = relaySummary(status);
   } catch {
-    text.textContent = 'Relaying an emergency alert nearby. Tap to see what is being sent.';
+    text.textContent = 'Relay status is unavailable right now. Your alert is kept on this device until it can be sent.';
   }
 }
 

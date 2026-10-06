@@ -13,7 +13,7 @@ export const LiveQueuePage: React.FC = () => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
 
   // Dynamic metric calculations
-  const openCount = incidents.filter((inc) => inc.status !== 'Resolved').length;
+  const openCount = incidents.filter((inc) => !['Resolved', 'Closed'].includes(inc.status)).length;
   const autoPushedCount = incidents.filter((inc) => inc.aiDetails.autoPushed).length;
   const viaRelayCount = incidents.filter((inc) => inc.aiDetails.viaRelay).length;
 

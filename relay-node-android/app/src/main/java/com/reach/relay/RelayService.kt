@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Peripheral: advertise REACH relay service, accept BLE fragments, validate, persist, ACK.
  * Also runs Wi-Fi ACK server and periodic queue drain/cleanup.
  */
-@SuppressLint("MissingPermission") // startRelay() gates on the BLUETOOTH_* permissions and returns early
+@SuppressLint("MissingPermission") // startRelay() gates on the BLUETOOTH_* permissions and returns false
 class RelayService : Service() {
     private val serviceUuid = UUID.fromString(RelayProtocol.SERVICE_UUID)
     private val writeUuid = UUID.fromString(RelayProtocol.DATA_UUID)
@@ -37,6 +37,8 @@ class RelayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val lastAck = ConcurrentHashMap<String, ByteArray>()
     private var wifiRelay: WifiDirectRelay? = null
+    @Volatile private var bleStarted = false
+    @Volatile private var wifiStarted = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -45,7 +47,13 @@ class RelayService : Service() {
      * that silently stops carrying packets is worse than one that never started, because the citizen
      * still sees "relay active" from the last snapshot.
      */
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // MainActivity restarts the service after the citizen answers a permission dialog. The
+        // process (and this service) may already exist, so retry any transport that was waiting on
+        // a permission instead of waiting for the next periodic tick.
+        try { startTransports() } catch (_: Exception) {}
+        return START_STICKY
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -56,26 +64,17 @@ class RelayService : Service() {
         }
         // Each transport is best-effort: a device that lacks BLE advertising, Wi-Fi Direct or the
         // right permission must still run whichever half it does have, not crash the whole node.
-        try {
-            startRelay()
-        } catch (e: Exception) {
-            Log.w(TAG, "BLE relay start failed: ${e.message}")
-        }
-        try {
-            wifiRelay = WifiDirectRelay(this).also { wr ->
-                wr.startAckServer(this, { listening -> wifiListening = listening }) { packet ->
-                    RelayForwarder.enqueue(this, packet)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Wi-Fi relay start failed: ${e.message}")
-        }
+        startTransports()
         // The service itself is up even when the Bluetooth half is refused, so the Wi-Fi path can
         // still carry packets and the UI must not report the whole node as stopped.
         isStarted = true
         // Periodic purge + drain
         handler.post(object : Runnable {
             override fun run() {
+                // A radio enabled from the notification shade (or a permission granted while the
+                // app was backgrounded) fires no callback here; retry any missing transport so the
+                // node does not stay half-started.
+                try { startTransports() } catch (_: Exception) {}
                 try {
                     val db = RelayQueueDb(this@RelayService)
                     db.purgeExpired()
@@ -87,6 +86,36 @@ class RelayService : Service() {
                 handler.postDelayed(this, 30_000L)
             }
         })
+    }
+
+    /**
+     * Start (or retry) both relay transports. Each is idempotent and best-effort: a device that
+     * lacks BLE advertising, Wi-Fi Direct or the right permission must still run whichever half it
+     * does have. Called on create and again on every service restart, because MainActivity restarts
+     * the service after the citizen answers a permission dialog — without the retry, granting
+     * Wi-Fi (or Bluetooth) after the first start left that transport dead until the process died.
+     */
+    private fun startTransports() {
+        if (!bleStarted) {
+            try {
+                if (startRelay()) bleStarted = true
+            } catch (e: Exception) {
+                Log.w(TAG, "BLE relay start failed: ${e.message}")
+            }
+        }
+        if (!wifiStarted) {
+            try {
+                val wr = WifiDirectRelay(this)
+                if (wr.startAckServer(this, { listening -> wifiListening = listening }) { packet ->
+                        RelayForwarder.enqueue(this, packet)
+                    }) {
+                    wifiRelay = wr
+                    wifiStarted = true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Wi-Fi relay start failed: ${e.message}")
+            }
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -110,13 +139,18 @@ class RelayService : Service() {
             .build()
     }
 
-    private fun startRelay() {
+    /**
+     * Start the BLE peripheral. Returns false when it could not start because a permission or the
+     * radio is missing (retryable once the citizen grants/enables it), true once the GATT server
+     * and advertiser are up.
+     */
+    private fun startRelay(): Boolean {
         // Peripheral needs connect (GATT server) + advertise; fail closed rather than
         // letting the platform throw SecurityException on a revoked permission.
-        if (!Permissions.bleConnect(this) || !Permissions.bleAdvertise(this)) return
+        if (!Permissions.bleConnect(this) || !Permissions.bleAdvertise(this)) return false
         val manager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = manager.adapter ?: return
-        if (!adapter.isEnabled) return
+        val adapter = manager.adapter ?: return false
+        if (!adapter.isEnabled) return false
         val service = BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         // Plain permissions, not *_ENCRYPTED_MITM. An MITM-encrypted characteristic cannot be
         // written over the first, unbonded connection a relay hop always starts with, so every
@@ -229,6 +263,7 @@ class RelayService : Service() {
         })
         running.set(true)
         isRunning = true
+        return true
     }
 
     override fun onDestroy() {

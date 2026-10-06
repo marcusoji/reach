@@ -143,8 +143,16 @@ export async function flushRelayQueue(){
     if(item.nextAttemptAt && item.nextAttemptAt>Date.now()) continue;
     if(Date.now()>=Number(item.packet?.e||0)){ await remove(item.id); expired++; continue; }
     if(!online){
-      // Offline: the radios are the only way out. A node without one keeps the packet queued.
-      if(handPacketToNativeRelay(item.packet)){ await remove(item.id); relayed++; }
+      // Offline: the radios are the only way out. Prefer the native node (it owns the background
+      // radios); otherwise, if this browser already paired a nearby node over Web Bluetooth, hand
+      // the signed packet straight to it rather than waiting for a connection that may never come.
+      if(handPacketToNativeRelay(item.packet)){ await remove(item.id); relayed++; continue; }
+      try{
+        if(directRelayAvailable() && directRelayConnection()){
+          const result=await sendPacketViaDirectRelay(item.packet);
+          if(result.ok){ await remove(item.id); relayed++; }
+        }
+      }catch{ /* node did not confirm; the row stays queued for the next attempt */ }
       continue;
     }
     try{
