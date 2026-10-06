@@ -2,12 +2,13 @@ import React from 'react';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { StatCard } from '../../components/common/StatCard';
 import { KeyValueRow } from '../../components/common/KeyValueRow';
+import { LoadingPanel } from '../../components/common/LoadingPanel';
 import { useApp } from '../../context/AppContext';
 
 export const OverviewPage: React.FC = () => {
-  const { institutions, incidents, backendOnline } = useApp();
+  const { institutions, incidents, backendOnline, dataLoading } = useApp();
   const currentInstitution = institutions[0];
-  if (!currentInstitution) return <div className="reach-card" style={{padding:'2rem'}}><h2>Institution data unavailable</h2><p style={{color:'var(--reach-text-secondary)',marginTop:8}}>Connect the REACH backend or finish institution setup to load live data.</p></div>; // Greenfield Estate
+  if (!currentInstitution) return dataLoading ? <LoadingPanel label="Loading institution…" /> : <div className="reach-card" style={{padding:'2rem'}}><h2>Institution data unavailable</h2><p style={{color:'var(--reach-text-secondary)',marginTop:8}}>Connect the REACH backend or finish institution setup to load live data.</p></div>; // Greenfield Estate
   const openCount = incidents.filter((i) => !['Resolved', 'Closed'].includes(i.status)).length;
 
   return (

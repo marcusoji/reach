@@ -3,6 +3,7 @@ import { SectionHeader } from '../../components/common/SectionHeader';
 import { KeyValueRow } from '../../components/common/KeyValueRow';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
+import { LoadingPanel } from '../../components/common/LoadingPanel';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { getInstitutionBmoniBilling, prepareBmoniInstitutionPayment, submitBmoniInstitutionPaymentSignature, createInstitutionBmoniUser, createBmoniOwnerProofChallenge, createBmoniWallet, startBmoniNigeria, getBmoniDepositAccount, getBmoniOnboardingStatus } from '../../lib/reachApi';
@@ -17,7 +18,7 @@ const money = (value: unknown) => {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'BMONI operation failed');
 
 export const BillingPlanPage: React.FC = () => {
-  const { institutions, paymentHistory } = useApp();
+  const { institutions, paymentHistory, dataLoading } = useApp();
   const { user, showToast } = useAuth();
   const [billing, setBilling] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +65,7 @@ export const BillingPlanPage: React.FC = () => {
     ['NGN virtual account', Boolean(account?.ngn_virtual_account_ready)],
   ] as const, [account]);
 
-  if (!currentInstitution) return <div className="reach-card" style={{padding:'2rem'}}><h2>Institution data unavailable</h2><p style={{color:'var(--reach-text-secondary)',marginTop:8}}>Connect the REACH backend or finish institution setup to load live data.</p></div>;
+  if (!currentInstitution) return dataLoading ? <LoadingPanel label="Loading institution…" /> : <div className="reach-card" style={{padding:'2rem'}}><h2>Institution data unavailable</h2><p style={{color:'var(--reach-text-secondary)',marginTop:8}}>Connect the REACH backend or finish institution setup to load live data.</p></div>;
 
   const run = async (fn: () => Promise<void>) => { setBusy(true); try { await fn(); } catch (error) { showToast(errorText(error)); } finally { setBusy(false); } };
 

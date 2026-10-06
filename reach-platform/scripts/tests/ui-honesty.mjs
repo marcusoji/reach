@@ -106,6 +106,24 @@ console.log('\n=== UI honesty ===');
     ck(`${rel.split('/').pop()} counts Closed as terminal`, /'Closed'/.test(page) && !/status !== 'Resolved'\)/.test(page));
   }
 }
+{
+  // Institution pages read `institutions[0]`, which is empty until the first backend fetch
+  // settles. Rendering "Institution data unavailable" during that window reads as a failed
+  // setup/connection even though the data is merely still loading, so each page must show a
+  // loading panel while `dataLoading` is true.
+  const ctx = read('reach-platform/src/context/AppContext.tsx') || '';
+  ck('AppContext exposes a dataLoading flag', /dataLoading/.test(ctx) && /setDataLoading/.test(ctx));
+  for (const rel of [
+    'reach-platform/src/pages/institution/OverviewPage.tsx',
+    'reach-platform/src/pages/institution/SiteIncidentsPage.tsx',
+    'reach-platform/src/pages/institution/BillingPlanPage.tsx',
+    'reach-platform/src/pages/institution/SecurityRosterPage.tsx',
+  ]) {
+    const page = read(rel) || '';
+    ck(`${rel.split('/').pop()} distinguishes loading from unavailable`,
+      /dataLoading/.test(page) && /LoadingPanel/.test(page));
+  }
+}
 
 console.log(`\nTOTAL: ${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

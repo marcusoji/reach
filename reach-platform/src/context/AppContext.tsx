@@ -19,6 +19,7 @@ interface AppContextType {
   paymentHistory: PaymentRecord[];
   recordPayment: (amount?: string) => void;
   backendOnline: boolean;
+  dataLoading: boolean;
   refreshIncidents: () => Promise<void>;
 }
 
@@ -41,9 +42,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [institutions, setInstitutions] = useState<InstitutionItem[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_INSTITUTIONS : []));
   const [paymentHistory, setPaymentHistory] = useState<PaymentRecord[]>(isBackendConfigured ? [] : (isDemoMode ? INITIAL_PAYMENT_HISTORY : []));
   const [backendOnline, setBackendOnline] = useState(false);
+  // True until the first backend load settles. Pages that need `institutions[0]` must distinguish
+  // "still loading" from "this account has no institution" — otherwise a cold reload briefly (and,
+  // if the first fetch is slow, for seconds) claims "Institution data unavailable".
+  const [dataLoading, setDataLoading] = useState(isBackendConfigured);
 
   const refreshIncidents = async () => {
     if (!isBackendConfigured) return;
+    setDataLoading(true);
     try {
       const [remote, responders, tasks] = await Promise.all([listIncidents(), listResponders().catch(() => ({ data: [] })), listTasks().catch(() => ({ data: [] }))]);
       setIncidents(remote.map(mapIncident));
@@ -67,6 +73,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setPaymentHistory((summary.data.payments || []).map((p:any) => ({ id:p.id, date:new Date(p.created_at).toLocaleDateString('en-GB'), code:p.provider_reference || p.id.slice(0,8), status:p.status === 'paid' ? 'Paid' : p.status === 'failed' ? 'Failed' : 'Pending', amount:p.amount ? `₦${Number(p.amount).toLocaleString()}` : undefined })));
         } catch { /* non-institution roles or unconfigured billing */ }
     } catch { setBackendOnline(false); }
+    finally { setDataLoading(false); }
   };
 
   useEffect(() => {
@@ -104,7 +111,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void changeTaskStatus(taskId, apiStatus).then(() => refreshIncidents()).catch(() => setBackendOnline(false));
   };
   const recordPayment = (amount = '₦1,450,000.00') => { if (!isBackendConfigured && isDemoMode) setPaymentHistory(prev => [{ id:`pay-${Date.now()}`, date:new Date().toLocaleDateString('en-GB'), code:`PAY-${Date.now().toString().slice(-6)}`, status:'Paid', amount }, ...prev]); };
-  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, backendOnline, refreshIncidents }}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{ incidents, updateIncidentStatus, assessIncident, staff, staffTasks, toggleTaskChecklist, advanceTaskStatus, institutions, paymentHistory, recordPayment, backendOnline, dataLoading, refreshIncidents }}>{children}</AppContext.Provider>;
 };
 
 export const useApp = () => { const context = useContext(AppContext); if (!context) throw new Error('useApp must be used within an AppProvider'); return context; };

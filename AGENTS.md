@@ -701,4 +701,15 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   `operator/summary`'s `activeCount`, which already excluded cancelled too). Pinned by
   `ui-honesty.mjs`.
 
+- **"Institution data unavailable" was really "still loading".** `institutions[0]` is empty until
+  `AppContext.refreshIncidents()` finishes, so on every cold reload the four institution pages
+  (`Overview`, `Site Incidents`, `Billing and Plan`, `Security Roster`) rendered *"Institution data
+  unavailable — Connect the REACH backend or finish institution setup"* for the first fetch — up to
+  seconds on a slow network — while the data was on its way. It reads as a failed setup/connection
+  and is the same class of dishonest status the rest of the UI avoids. `AppContext` now exposes
+  `dataLoading` (true until the first load settles, in a `finally`), and each page shows a
+  `LoadingPanel` while it is true, falling back to the unavailable message only when the load has
+  settled with no institution. A reload still flashes the loading panel, but never claims the
+  backend is missing while it is being fetched. Pinned by `ui-honesty.mjs`.
+
 
