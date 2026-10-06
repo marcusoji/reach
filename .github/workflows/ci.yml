@@ -40,6 +40,7 @@ jobs:
       - run: npm run test:pwa-location
       - run: npm run test:pwa-api-resilience
       - run: npm run test:pwa-evidence
+      - run: npm run test:pwa-db
       - run: npm run test:pwa-relay-evidence
       - run: npm run test:pwa-estate-join
       - run: npm run test:pwa-relay-export

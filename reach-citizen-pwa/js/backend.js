@@ -2,19 +2,13 @@ import { appState } from './state.js';
 import { buildRelayPacket, getRelayIdentity, toServerPacket } from './relay/protocol.js';
 import { detectRelayCapabilities } from './relay/capabilities.js';
 import { directRelayAvailable, directRelayConnection, connectDirectRelay, sendPacketViaDirectRelay, probeDirectRelay } from './relay/direct.js';
+import { openReachDb, INCIDENT_STORE as STORE, RELAY_STORE, EVIDENCE_STORE } from './db.js';
 
 const cfg = window.REACH_CONFIG || {};
 const SUPABASE_URL = (cfg.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_ANON_KEY = cfg.SUPABASE_ANON_KEY || '';
 const API_URL = (cfg.API_URL || `${SUPABASE_URL}/functions/v1/api`).replace(/\/$/, '');
 const SESSION_KEY = 'reach_pwa_session';
-const DB_NAME = 'reach-offline';
-// One version for the whole database. IndexedDB throws VersionError if a connection is opened at a
-// lower version than the existing one, so every module that opens `reach-offline` must agree;
-// evidence.js owns the same constant and creates the evidence-queue store.
-const DB_VERSION = 4;
-const STORE = 'incident-queue';
-const RELAY_STORE = 'relay-queue';
 const QUEUE_STATE_QUEUED = 'queued';
 const QUEUE_STATE_RETRYING = 'retrying';
 const QUEUE_STATE_DEAD = 'dead_letter';
@@ -354,7 +348,7 @@ export async function flushQueue(){
   }
   return {sent,remaining:await queueCount(),dead};
 }
-function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});if(!db.objectStoreNames.contains('sync-meta'))db.createObjectStore('sync-meta',{keyPath:'key'});if(!db.objectStoreNames.contains(RELAY_STORE))db.createObjectStore(RELAY_STORE,{keyPath:'id'});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+function openDb(){return openReachDb();}
 function put(db,value){return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 function allQueued(){return openDb().then(async db=>{await purgeExpired(db,Date.now());return allQueuedFromDb(db);});}
 function allQueuedFromDb(db){return new Promise((resolve,reject)=>{const req=db.transaction(STORE).objectStore(STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);});}
@@ -379,7 +373,7 @@ async function rebindQueuedEvidence(reportKey, incidentId) {
       if (row.incidentKey !== reportKey || row.incidentId) continue;
       await queueEvidenceCapture({ incidentId, incidentKey: null, kind: row.kind, blob: row.blob, mime: row.mime, meta: row.meta });
       const db = await openDb();
-      await new Promise((resolve, reject) => { const tx = db.transaction('evidence-queue', 'readwrite'); tx.objectStore('evidence-queue').delete(row.id); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+      await new Promise((resolve, reject) => { const tx = db.transaction(EVIDENCE_STORE, 'readwrite'); tx.objectStore(EVIDENCE_STORE).delete(row.id); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
     }
   } catch { /* evidence stays queued; the next flush retries */ }
 }

@@ -39,7 +39,11 @@ const jsFiles = readdirSync(join(pwa,'js')).filter(f=>f.endsWith('.js'));
 for (const file of jsFiles) execFileSync(process.execPath,['--check',join(pwa,'js',file)],{stdio:'pipe'});
 const pwaHtml = readFileSync(join(pwa,'index.html'),'utf8');
 if (/value="(?:Amaka Okafor|amaka@example.com|reachdemo123)"/i.test(pwaHtml)) throw new Error('PWA contains demo credentials as form values');
-if (!readFileSync(join(pwa,'js','backend.js'),'utf8').includes('indexedDB')) throw new Error('Offline queue implementation missing');
+// The offline queues live in one IndexedDB whose schema is owned by db.js; backend.js and
+// evidence.js must go through it rather than opening the database themselves.
+const dbSrc = readFileSync(join(pwa,'js','db.js'),'utf8');
+if (!dbSrc.includes('indexedDB.open') || !dbSrc.includes("'evidence-queue'")) throw new Error('Offline queue implementation missing');
+if (!readFileSync(join(pwa,'js','backend.js'),'utf8').includes('openReachDb')) throw new Error('backend.js does not use the shared offline database opener');
 // The PWA is offline-first, so sw.js must precache every module the app imports. A module
 // reachable only over the network makes a cold offline start fail with a module-load error.
 const sw = readFileSync(join(pwa,'sw.js'),'utf8');

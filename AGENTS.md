@@ -189,6 +189,17 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
 - `reach-citizen-pwa/sw.js` must precache every module the app imports. `validate.mjs` walks the import
   graph and fails if an imported module is missing from the `ASSETS` list, so adding a new relay/JS
   module means adding it there too. A network-only module breaks the cold offline start.
+- The PWA offline queues share one IndexedDB (`reach-offline`) whose schema has a **single owner**:
+  `js/db.js` (`openReachDb()`, `DB_VERSION`, the `*_STORE` names). `backend.js` and `evidence.js` used
+  to each call `indexedDB.open` at the same version with different store lists, and because an upgrade
+  only runs when the requested version is *higher*, whichever opened first decided the schema:
+  `initBackendSync()` created incident-queue/sync-meta/relay-queue, evidence.js then opened at the same
+  version, no upgrade fired, and `transaction('evidence-queue')` threw "One of the specified object
+  stores was not found" — so no photo or attachment could ever be saved. `DB_VERSION` is now `5` so a
+  device already stuck at `4` upgrades and gains the store; `onversionchange` closes the connection so a
+  newer tab's upgrade is not blocked. Never open `reach-offline` outside `db.js`. The other PWA tests'
+  IndexedDB stubs ignore the version, which is why they missed this; `scripts/tests/pwa-db-schema.mjs`
+  (CI: `npm run test:pwa-db`) models real upgrade semantics and pins the heal-from-v4 case.
 - `tests/rls_tenant_isolation.sql` runs inside `npm run validate:migrations` (and therefore CI), so a
   policy regression fails alongside the migration that caused it. The suite grants full DML to
   `authenticated` before asserting, so a failure reflects RLS/policy, not a missing table grant.

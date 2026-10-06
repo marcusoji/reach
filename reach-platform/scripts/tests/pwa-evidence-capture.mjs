@@ -177,13 +177,16 @@ console.log('\n=== PWA evidence capture ===');
 }
 
 {
-  // 9. Both modules open the same IndexedDB at the same version. A mismatch throws VersionError in
-  //    the browser, which would silently stop the evidence queue from working.
-  const versionOf = (file) => Number((readFileSync(path.join(PWA, file), 'utf8').match(/const DB_VERSION = (\d+)/) || [])[1]);
-  ck('backend.js and evidence.js agree on the database version', versionOf('backend.js') === versionOf('evidence.js') && versionOf('backend.js') > 0, `backend=${versionOf('backend.js')} evidence=${versionOf('evidence.js')}`);
+  // 9. Both modules must use the shared schema owner (db.js) so neither can create a store the
+  //    other misses. They previously each opened IndexedDB directly and disagreed on the store
+  //    list, which left `evidence-queue` uncreated and made every capture fail.
   const backendSrc = readFileSync(path.join(PWA, 'backend.js'), 'utf8');
-  ck('backend.js opens the database at DB_VERSION', backendSrc.includes('indexedDB.open(DB_NAME,DB_VERSION)'));
-  ck('evidence.js opens the database at DB_VERSION', readFileSync(path.join(PWA, 'evidence.js'), 'utf8').includes('indexedDB.open(DB_NAME, DB_VERSION)'));
+  const evidenceSrc = readFileSync(path.join(PWA, 'evidence.js'), 'utf8');
+  const dbSrc = readFileSync(path.join(PWA, 'db.js'), 'utf8');
+  ck('backend.js uses the shared database opener', backendSrc.includes("from './db.js'") && backendSrc.includes('openReachDb'));
+  ck('evidence.js uses the shared database opener', evidenceSrc.includes("from './db.js'") && evidenceSrc.includes('openReachDb'));
+  ck('db.js creates the evidence-queue store', dbSrc.includes("EVIDENCE_STORE = 'evidence-queue'"));
+  ck('neither module opens IndexedDB directly', !backendSrc.includes('indexedDB.open') && !evidenceSrc.includes('indexedDB.open'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

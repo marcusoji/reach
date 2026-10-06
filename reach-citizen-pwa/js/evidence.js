@@ -14,6 +14,7 @@
  */
 
 import { sha256Hex, evidenceKindForMime } from './utils.js';
+import { openReachDb, EVIDENCE_STORE as STORE } from './db.js';
 
 const cfg = window.REACH_CONFIG || {};
 const SUPABASE_URL = (cfg.SUPABASE_URL || '').replace(/\/$/, '');
@@ -21,11 +22,6 @@ const SUPABASE_ANON_KEY = cfg.SUPABASE_ANON_KEY || '';
 const API_URL = (cfg.API_URL || `${SUPABASE_URL}/functions/v1/api`).replace(/\/$/, '');
 const BUCKET = 'incident-evidence';
 const SESSION_KEY = 'reach_pwa_session';
-const DB_NAME = 'reach-offline';
-// Must match backend.js: both modules open `reach-offline`, and IndexedDB rejects a connection
-// opened below the existing version. Bumped to 4 to add the evidence-queue store.
-const DB_VERSION = 4;
-const STORE = 'evidence-queue';
 
 /** Kinds a citizen device may capture. `corroboration` is deliberately absent: it has to mean
  * independent corroboration, not something a client asserts about itself. */
@@ -34,20 +30,7 @@ export const CAPTURE_KINDS = ['image', 'audio', 'video'];
 function getSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } }
 export function hasSession() { return Boolean(getSession()?.access_token); }
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains('incident-queue')) db.createObjectStore('incident-queue', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('sync-meta')) db.createObjectStore('sync-meta', { keyPath: 'key' });
-      if (!db.objectStoreNames.contains('relay-queue')) db.createObjectStore('relay-queue', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
+const openDb = openReachDb;
 
 function txDone(tx) { return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); }); }
 
