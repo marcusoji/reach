@@ -1,7 +1,7 @@
 # REACH Production Status
 
 **Package:** REACH-PHASE4-CERT-READY (Phases 1–4)  
-**Migrations:** 0001–0018  
+**Migrations:** 0001–0022  
 **Last updated:** 2026-10-01  
 
 This is the **authoritative** status document. Older audit/fix/next-fix notes
@@ -9,7 +9,7 @@ have been consolidated into [HARDENING_LOG.md](./HARDENING_LOG.md) and
 [RELEASE_NOTES.md](./RELEASE_NOTES.md).
 
 ## What this package is
-Integrated MVP: `reach-platform` (React), `reach-citizen-pwa`, `relay-node-android`, Supabase migrations `0001`–`0018`.
+Integrated MVP: `reach-platform` (React), `reach-citizen-pwa`, `relay-node-android`, Supabase migrations `0001`–`0022`.
 
 ## Phase 1 implemented in this build
 
@@ -65,7 +65,7 @@ cd ../relay-node-android && ./gradlew assembleDebug   # add wrapper if missing
 - AI calibration metrics  
 
 ## Migration order
-`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009`
+`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 → 0014 → 0015 → 0016 → 0017 → 0018 → 0019 → 0020 → 0021 → 0022`
 
 ## Demo mode
 `VITE_REACH_DEMO_MODE=true` only for local demo with empty Supabase config. Never production.
@@ -105,7 +105,7 @@ cd ../relay-node-android && ./gradlew assembleDebug   # add wrapper if missing
 | 20. Realtime validation | **Improved** — exponential backoff, token refresh before resubscribe, heartbeat retained |
 
 ### Migrations
-`0001` … `0009` → **`0010_phase3_reliability.sql`**
+`0001` … `0009` → **`0010_phase3_reliability.sql`** … **`0022_citizen_institution_join.sql`**
 
 ### Still external
 Physical multi-phone tests, live BMONI fixtures, full RLS/load/pen suites, real SMS/USSD providers, AI calibration.

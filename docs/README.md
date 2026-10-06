@@ -1,6 +1,6 @@
 # REACH documentation
 
-**Current package:** Phase 4 cert-ready (migrations `0001`–`0018`)
+**Current package:** Phase 4 cert-ready (migrations `0001`–`0022`)
 
 ## Status and sign-off
 | Document | Purpose |

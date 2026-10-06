@@ -97,7 +97,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Migrations apply in filename order, `0001` → `0019`. **Never skip one.** If you
+Migrations apply in filename order, `0001` → `0022`. **Never skip one.** If you
 prefer, paste each file into the Supabase SQL editor in the same order.
 
 ### 3.3 Enable Realtime
@@ -125,7 +125,7 @@ done
 npm run validate:migrations
 ```
 
-Result should be: `19 migrations applied transactionally (31 tables)` and
+Result should be: `22 migrations applied transactionally (31 tables)` and
 `row level security enabled on every public table`.
 
 ---
@@ -603,7 +603,7 @@ These require a deployed staging environment and, for pen/load, dedicated toolin
   claim. Measure precision, recall, false positive/negative rate, calibration,
   abstention and latency. Keep the UI labelled advisory.
 - **Cutover:** `VITE_REACH_DEMO_MODE=false` everywhere, production Supabase URL and
-  anon key, migrations `0001`–`0018` on production, production secrets, monitoring
+  anon key, migrations `0001`–`0022` on production, production secrets, monitoring
   and backups.
 
 ---

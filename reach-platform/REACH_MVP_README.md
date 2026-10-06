@@ -69,16 +69,16 @@ Billing is institution-level. The UI no longer pretends a payment was completed.
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/0001_reach_mvp.sql`.
-3. Run `supabase/migrations/0002_security_and_workflows.sql`.
-4. Deploy `supabase/functions/api/index.ts` as the `api` Edge Function.
-5. Configure server-side secrets:
+2. Apply the full migration set in order, `0001` → `0022` (`supabase/migrations/`), e.g. with
+   `supabase db push`. Do not skip earlier files.
+3. Deploy `supabase/functions/api/index.ts` as the `api` Edge Function.
+4. Configure server-side secrets:
    - `REACH_ALLOWED_ORIGINS`
    - `REACH_OPERATOR_PROVISION_KEY`
-6. Configure the React `.env.local` with the Supabase URL, anon key and API URL.
-7. Configure the Citizen PWA `js/config.js` with the same public URL/anon key/API URL.
-8. Enable email verification/password recovery in Supabase Auth before production.
-9. Test RLS and the complete incident lifecycle with separate test users for each role.
+5. Configure the React `.env.local` with the Supabase URL, anon key and API URL.
+6. Configure the Citizen PWA `js/config.js` with the same public URL/anon key/API URL.
+7. Enable email verification/password recovery in Supabase Auth before production.
+8. Test RLS and the complete incident lifecycle with separate test users for each role.
 
 ## Important deployment rules
 

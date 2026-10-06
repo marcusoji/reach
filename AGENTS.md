@@ -4,7 +4,7 @@
 
 - `reach-platform/` — React + Vite + TypeScript operations platform (4 roles: security-desk, staff, institution, operator).
 - `reach-citizen-pwa/` — vanilla-JS citizen emergency PWA (no build step).
-- `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0012`) and the `api` Edge Function (`functions/api/`).
+- `reach-platform/supabase/` — Postgres schema/RLS/workflows (`migrations/0001`–`0022`) and the `api` Edge Function (`functions/api/`).
 - `relay-node-android/` — native Android relay (Kotlin). `bmoni-institution-mobile/` — Flutter BMONI signing service.
 - `docs/` — **all** product documentation; start at `docs/README.md`. Keep the root free of loose notes: only `README.md` and `AGENTS.md` live there. Merge new fix logs into `docs/HARDENING_LOG.md` and release notes into `docs/RELEASE_NOTES.md` rather than adding another root `*_FIXES.md`.
 - `tests/` — RLS, BMONI webhook, load (k6) and AI-calibration harnesses.
@@ -69,6 +69,11 @@ Connection via `REACH_TEST_DATABASE_URL`, or `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSW
   regress migrations `0002` (`revoke all on public.func` → must be `on function`) and `0004` (unbraced `text[]`).
   When merging a package, always keep the repo's `supabase/migrations/0002`,`0004`, `scripts/tests/migrations.mjs`,
   `scripts/tests/supabase-bootstrap.sql` and the `validate:migrations` script, then re-run `validate:migrations`.
+- Build a distribution archive with `npm run package` (`scripts/package.mjs`), never by zipping the working
+  directory. `git archive` emits only committed files, so dependency directories cannot leak in: `node_modules/`
+  is ignored, and `reach-platform/.gitignore` now also covers `node_modules_old/` and `node_modules*/` (a stale
+  `node_modules_old/` is *not* matched by a bare `node_modules/` rule). The script hard-fails if a
+  `node_modules*` path ever appears in the tree, so a partial dependency tree can no longer ship.
 - `relay-node-android/` build works from a clean checkout: the Gradle wrapper jar is committed, and
   `./gradlew assembleDebug lint` passes on JDK 17 with `ANDROID_HOME` set (`local.properties` is git-ignored).
   CI's android job gates on `gradle/wrapper/gradle-wrapper.jar` being present.

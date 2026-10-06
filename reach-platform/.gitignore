@@ -18,6 +18,8 @@ pids
 
 # Dependency directories
 node_modules/
+node_modules_old/
+node_modules*/
 
 # Production build outputs
 dist/
