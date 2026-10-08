@@ -1,7 +1,7 @@
 {
   "name": "REACH Citizen",
   "short_name": "REACH",
-  "description": "Resilient Emergency Alert & Community Help",
+  "description": "Rapid Emergency Alert & Community Help",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f8faf8",

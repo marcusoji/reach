@@ -181,7 +181,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ defaultMode = 'login' }) => 
               <ReachLogo size={42} />
             </div>
             <div className="auth-brand-name">REACH</div>
-            <p className="auth-brand-tag">Resilient Emergency Alert &amp; Community Help</p>
+            <p className="auth-brand-tag">Rapid Emergency Alert &amp; Community Help</p>
             <ul className="auth-points">
               <li>Institutions subscribe only</li>
               <li>AI assists evidence review and prioritization; humans verify incidents</li>
@@ -199,7 +199,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ defaultMode = 'login' }) => 
                 <ReachLogo size={52} />
               </div>
               <h1 className="auth-mobile-name">REACH</h1>
-              <p className="auth-mobile-tag">Resilient Emergency Alert &amp; Community Help</p>
+              <p className="auth-mobile-tag">Rapid Emergency Alert &amp; Community Help</p>
             </div>
 
             {/* Form Mode Tabs */}
